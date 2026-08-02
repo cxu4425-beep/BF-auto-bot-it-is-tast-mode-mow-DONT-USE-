@@ -1,0 +1,20 @@
+﻿==================================================
+🤖 遊戲機器人（C# 肉體端 + Python 大腦端）作戰備忘錄
+==================================================
+
+📌 1. 專案根目錄路徑：
+C:\Users\cxu44\Agent_Manus\GameBotCS
+
+📌 2. 啟動 Python FastAPI 後台指令：
+cd C:\Users\cxu44\Agent_Manus\GameBotCS
+uvicorn main:app --port 8000
+
+📌 3. 啟動 C# 肉體端指令（開另一個視窗）：
+cd C:\Users\cxu44\Agent_Manus\GameBotCS
+dotnet run
+
+📌 4. 關鍵對齊設定 (Port 8000 & decide_v2)：
+- Python 端路由：@app.post("/decide_v2")
+- C# 端發送網址：http://localhost:8000/decide_v2
+
+==================================================

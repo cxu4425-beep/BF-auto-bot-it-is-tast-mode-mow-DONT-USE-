@@ -1,0 +1,132 @@
+import time
+import os
+import random
+from agent_brain import LLaVAAgentBrain
+
+# 引入鍵盤滑鼠控制與熱鍵套件
+try:
+    import pyautogui
+except ImportError:
+    print("💡 提示: 請執行 'pip install pyautogui' 以便讓 AI 能自動切換輸入法")
+
+def force_english_input():
+    """
+    強制作戰準備：模擬按下 Win + Space 來切換輸入法，
+    防止微軟注音卡中文導致大佛與龍拳的技能被吃掉。
+    """
+    print("⌨️ [輸入法防卡] 檢查輸入法狀態，自動執行 Win + Space 強制切換為英文...")
+    try:
+        pyautogui.hotkey('win', 'space')
+        time.sleep(0.2)  # 給系統一點反應時間
+    except Exception as e:
+        print(f"⚠️ 無法自動切換輸入法: {e}")
+
+def main():
+    print("====== 🤖 狀態機引導型·大佛龍拳速通 AI 啟動 ======")
+    brain = LLaVAAgentBrain(model_name="llava:7b")
+    
+    assets_dir = "../assets"
+    images = [os.path.join(assets_dir, f) for f in os.listdir(assets_dir) if f.endswith('.png') or f.endswith('.jpg')] if os.path.exists(assets_dir) else []
+    
+    frame_count = 0
+    
+    # 🌟 核心：初始階段設定為「接任務」
+    # 狀態清單: "GET_QUEST" (捷徑尋路接任務), "COMBAT" (大佛龍拳爆發打怪)
+    current_stage = "GET_QUEST" 
+    print(f"📌 系統初始化階段設定：【{current_stage}】")
+
+    # 🚀 啟動時先做一次輸入法防卡防禦
+    force_english_input()
+
+    try:
+        while True:
+            frame_count += 1
+            print(f"\n[Frame {frame_count}] ----------------------------------------")
+            print(f"🧠 當前 AI 核心目標任務：【{current_stage}】")
+            
+            # 每隔 10 個 Frame 自動重整一次輸入法，防止中途歪掉
+            if frame_count % 10 == 0:
+                force_english_input()
+
+            # --- 第一步：根據「當前要做什麼」，在對應階段抓取對應畫面 ---
+            if current_stage == "GET_QUEST":
+                # 接任務尋路階段，優先看導航截圖
+                nav_images = [img for img in images if any(k in img for k in ["011954", "012002", "012024", "quest", "npc"])]
+                current_image = random.choice(nav_images) if nav_images else random.choice(images)
+            elif current_stage == "COMBAT":
+                # 戰鬥階段，專注看怪物血條或戰鬥畫面
+                combat_images = [img for img in images if any(k in img.lower() for k in ["monster", "alive", "bar"])]
+                current_image = random.choice(combat_images) if combat_images else random.choice(images)
+            else:
+                current_image = random.choice(images)
+
+            if current_image:
+                print(f"🔍 視覺導向對焦 -> 正在分析圖片: {os.path.basename(current_image)}")
+
+            # --- 第二步：讓大腦看圖思考 ---
+            llava_result = brain.analyze_frame_with_llava(current_image)
+            intent_type = llava_result.get("DecisionIntent", "Idle")
+            current_file = os.path.basename(current_image).lower() if current_image else ""
+            
+            actions = []
+            
+            # --- 第三步：實裝老哥的「紅房子飛跳身法」狀態機決策 ---
+            if current_stage == "GET_QUEST":
+                # 實作經典最速身法路線
+                if "011954" in current_file:
+                    print("🔄 [身法 1] 出生點出發！執行【滑鼠右轉】，校準紅房子方向。")
+                    actions.append({"ActionType": "MousePan", "Yaw": 90})
+                    actions.append({"ActionType": "KeyStroke", "Key": "W"})
+                    
+                elif "012002" in current_file:
+                    print("🏠 [身法 2] 看到紅房子了！執行【長按 W + Space 點跳】，直接翻上屋頂！")
+                    actions.append({"ActionType": "KeyStroke", "Key": "W"})
+                    actions.append({"ActionType": "KeyStroke", "Key": "Space"})
+                    
+                elif "012024" in current_file or intent_type == "InteractWithNPC":
+                    print("⚡ [身法 3] 抵達屋頂！【向右轉 15 度】對準廣場，開啟【Q 鍵衝刺】凌空空降！")
+                    actions.append({"ActionType": "MousePan", "Yaw": 15})
+                    actions.append({"ActionType": "KeyStroke", "Key": "Q"})
+                    actions.append({"ActionType": "KeyStroke", "Key": "W"})
+                    
+                    print("📜 [狀態變更] 成功抵達 NPC 面前並接取任務！")
+                    print("🔥 [黃金連招] 覺醒爆發：開啟 2 (大佛型態) -> 切換 1 (龍拳戰鬥技能)！")
+                    actions.append({"ActionType": "KeyStroke", "Key": "2"})
+                    actions.append({"ActionType": "KeyStroke", "Key": "1"})
+                    
+                    # 順暢接單成功，立刻切換至打怪狀態！
+                    current_stage = "COMBAT"
+                else:
+                    print("🏃 [前置尋路] 尚未辨識出路標，發送 W 鍵繼續摸索...")
+                    actions.append({"ActionType": "KeyStroke", "Key": "W"})
+
+            elif current_stage == "COMBAT":
+                # 戰鬥狀態下的防禦與爆發邏輯
+                if intent_type == "Navigate" or "null" in llava_result.get("TargetId", "null"):
+                    print("🎉 [狀態達成] 畫面上已無怪物血條！清場完畢，切換回接任務階段。")
+                    current_stage = "GET_QUEST"
+                else:
+                    print("⚔️ [狀態執行] 大佛龍拳格鬥模式激戰中... 左鍵瘋狂平 A！")
+                    actions.append({"ActionType": "MouseClick", "Key": "Left"})
+                    
+                    # 戰鬥中自動按技能 Z 和 X
+                    skill = random.choice(["Z", "X"])
+                    print(f"⚡ [技能爆發] 釋放核心傷害技能：按下 【{skill}】 鍵！")
+                    actions.append({"ActionType": "KeyStroke", "Key": skill})
+
+            # --- 第四步：打包 C# 執行合約 ---
+            payload = {
+                "stage": current_stage,
+                "intent": intent_type,
+                "actions": actions,
+                "timestamp": int(time.time() * 1000)
+            }
+            
+            # 配合大腦運算節奏，每 2 秒大腦決策跳一幀
+            time.sleep(2.0)
+            
+    except KeyboardInterrupt:
+        print("\n🛑 AI 狀態機控制中心已由使用者安全終止。")
+
+if __name__ == "__main__":
+    main()

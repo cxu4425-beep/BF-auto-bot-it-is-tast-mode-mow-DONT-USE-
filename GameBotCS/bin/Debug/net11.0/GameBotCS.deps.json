@@ -1,0 +1,97 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v11.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v11.0": {
+      "GameBotCS/1.0.0": {
+        "dependencies": {
+          "Newtonsoft.Json": "13.0.4",
+          "System.Drawing.Common": "10.0.10"
+        },
+        "runtime": {
+          "GameBotCS.dll": {}
+        }
+      },
+      "Microsoft.Win32.SystemEvents/10.0.10": {
+        "runtime": {
+          "lib/net10.0/Microsoft.Win32.SystemEvents.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1026.32716",
+            "localPath": "Microsoft.Win32.SystemEvents.dll"
+          }
+        },
+        "runtimeTargets": {
+          "runtimes/win/lib/net10.0/Microsoft.Win32.SystemEvents.dll": {
+            "rid": "win",
+            "assetType": "runtime",
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1026.32716",
+            "localPath": "runtimes/win/lib/net10.0/Microsoft.Win32.SystemEvents.dll"
+          }
+        }
+      },
+      "Newtonsoft.Json/13.0.4": {
+        "runtime": {
+          "lib/net6.0/Newtonsoft.Json.dll": {
+            "assemblyVersion": "13.0.0.0",
+            "fileVersion": "13.0.4.30916",
+            "localPath": "Newtonsoft.Json.dll"
+          }
+        }
+      },
+      "System.Drawing.Common/10.0.10": {
+        "dependencies": {
+          "Microsoft.Win32.SystemEvents": "10.0.10"
+        },
+        "runtime": {
+          "lib/net10.0/System.Drawing.Common.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1026.32716",
+            "localPath": "System.Drawing.Common.dll"
+          },
+          "lib/net10.0/System.Private.Windows.Core.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1026.32716",
+            "localPath": "System.Private.Windows.Core.dll"
+          },
+          "lib/net10.0/System.Private.Windows.GdiPlus.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1026.32716",
+            "localPath": "System.Private.Windows.GdiPlus.dll"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "GameBotCS/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Win32.SystemEvents/10.0.10": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-IY0lTfC2uVwTizjtGgQ03ViwyXGQ9lMDblzB889/HyguAZJ2J8pRrjPown8h2eJe8WFc8nh+BUEsEPkshzizYQ==",
+      "path": "microsoft.win32.systemevents/10.0.10",
+      "hashPath": "microsoft.win32.systemevents.10.0.10.nupkg.sha512"
+    },
+    "Newtonsoft.Json/13.0.4": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-pdgNNMai3zv51W5aq268sujXUyx7SNdE2bj1wZcWjAQrKMFZV260lbqYop1d2GM67JI1huLRwxo9ZqnfF/lC6A==",
+      "path": "newtonsoft.json/13.0.4",
+      "hashPath": "newtonsoft.json.13.0.4.nupkg.sha512"
+    },
+    "System.Drawing.Common/10.0.10": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-R9q9TI//kGavXWTxvaSS9ERj79s+Vm7V7769zEmRbzdrIOJzAnGw+wWSo/JkaVdQfAAefV2V1bWYKCHF7Zs5oQ==",
+      "path": "system.drawing.common/10.0.10",
+      "hashPath": "system.drawing.common.10.0.10.nupkg.sha512"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\bin\Debug\net8.0-windows\BloxFruitsBot.exe
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\bin\Debug\net8.0-windows\BloxFruitsBot.deps.json
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\bin\Debug\net8.0-windows\BloxFruitsBot.runtimeconfig.json
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\bin\Debug\net8.0-windows\BloxFruitsBot.dll
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\bin\Debug\net8.0-windows\BloxFruitsBot.pdb
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\obj\Debug\net8.0-windows\BloxFruitsBot.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\obj\Debug\net8.0-windows\BloxFruitsBot.AssemblyInfoInputs.cache
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\obj\Debug\net8.0-windows\BloxFruitsBot.AssemblyInfo.cs
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\obj\Debug\net8.0-windows\BloxFruitsBot.csproj.CoreCompileInputs.cache
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\obj\Debug\net8.0-windows\BloxFruitsBot.dll
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\obj\Debug\net8.0-windows\refint\BloxFruitsBot.dll
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\obj\Debug\net8.0-windows\BloxFruitsBot.pdb
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\obj\Debug\net8.0-windows\BloxFruitsBot.genruntimeconfig.cache
+C:\Users\cxu44\Agent_Manus\BloxFruitsBot\obj\Debug\net8.0-windows\ref\BloxFruitsBot.dll
