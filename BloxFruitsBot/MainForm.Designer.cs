@@ -1,3 +1,7 @@
+// .Designer.cs 會被編譯器當成自動產生的檔案，不套用專案層級的 <Nullable>enable</Nullable>。
+// 下面用到 IContainer? 與 null! 這些可為 null 的註釋，必須在檔案內明確開啟才不會觸發 CS8669。
+#nullable enable
+
 namespace BloxFruitsBot
 {
     partial class MainForm
