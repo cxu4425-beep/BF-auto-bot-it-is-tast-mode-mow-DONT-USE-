@@ -5,9 +5,9 @@ namespace BloxFruitsBot
         /// <summary>
         /// Required designer variable.
         /// </summary>
-        private System.ComponentModel.IContainer components = null;
+        private System.ComponentModel.IContainer? components = null;
 
-        /// <summary>s
+        /// <summary>
         /// Clean up any resources being used.
         /// </summary>
         /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
@@ -81,8 +81,9 @@ namespace BloxFruitsBot
 
         #endregion
 
-        private System.Windows.Forms.Button btnStart;
-        private System.Windows.Forms.Button btnStop;
-        private System.Windows.Forms.RichTextBox richTextBoxLog;
+        // InitializeComponent() 一定會賦值，用 null! 告訴編譯器不必發 CS8618 警告
+        private System.Windows.Forms.Button btnStart = null!;
+        private System.Windows.Forms.Button btnStop = null!;
+        private System.Windows.Forms.RichTextBox richTextBoxLog = null!;
     }
 }

@@ -1,0 +1,12 @@
+# AI 決策伺服器 (main.py / fastapi_server.py)
+fastapi>=0.110
+uvicorn[standard]>=0.27
+requests>=2.31
+pydantic>=2.6
+
+# fastapi_server.py 走 ollama 套件；main.py 只用 requests 直接打 Ollama HTTP API
+ollama>=0.3
+
+# Named Pipe 客戶端的 OpenCV 影像辨識 (python_client.py)
+opencv-python>=4.9
+numpy>=1.26

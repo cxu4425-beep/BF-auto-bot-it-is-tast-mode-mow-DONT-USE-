@@ -126,7 +126,9 @@ namespace BloxFruitsBot
                         using (Graphics gfx = Graphics.FromImage(bmp))
                         {
                             IntPtr hdcBitmap = gfx.GetHdc();
-                            IntPtr hdcWindow = Win32.GetWindowDC(_targetWindowHwnd);
+                            // 用 GetDC（客戶區 DC）配 GetClientRect，原點才對得上。
+                            // GetWindowDC 的原點含標題列，會讓畫面整個往下偏、底部被裁掉。
+                            IntPtr hdcWindow = Win32.GetDC(_targetWindowHwnd);
                             if (hdcWindow != IntPtr.Zero)
                             {
                                 try
@@ -155,7 +157,13 @@ namespace BloxFruitsBot
             }
 
             // Fallback: 截取全螢幕
-            Rectangle bounds = Screen.PrimaryScreen.Bounds;
+            // Screen.PrimaryScreen 在沒有顯示器的工作階段會是 null，直接取 .Bounds 會炸 NullReference
+            Screen? primaryScreen = Screen.PrimaryScreen;
+            if (primaryScreen == null)
+            {
+                throw new InvalidOperationException("找不到主螢幕，無法截圖（是否在無顯示器的環境執行？）。");
+            }
+            Rectangle bounds = primaryScreen.Bounds;
             Bitmap fullScreenBitmap = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb);
             using (Graphics g = Graphics.FromImage(fullScreenBitmap))
             {

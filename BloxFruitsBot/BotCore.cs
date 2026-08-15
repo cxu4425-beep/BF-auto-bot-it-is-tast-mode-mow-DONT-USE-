@@ -8,10 +8,10 @@ namespace BloxFruitsBot
 { 
     public class BotCore 
     { 
-        private IntPtr _robloxHwnd; 
-        private Action<string> _logAction; 
-        private Random _random; 
-        private CancellationTokenSource _cts; 
+        private IntPtr _robloxHwnd;
+        private Action<string> _logAction;
+        private Random _random;
+        private CancellationTokenSource? _cts;
  
         public enum BotState 
         { 
@@ -40,9 +40,12 @@ namespace BloxFruitsBot
                 return; 
             } 
  
-            _cts = new CancellationTokenSource(); 
-            _logAction("Bot 啟動。"); 
-            Task.Run(() => RunBotLoop(_cts.Token)); 
+            _cts = new CancellationTokenSource();
+            // 先取出 token 再交給 lambda：直接在 lambda 內用 _cts.Token 會捕捉可為 null 的欄位，
+            // 編譯器無法做 null 流程分析（CS8602），而且 Stop() 之後欄位被換掉也會取到錯的 token。
+            CancellationToken token = _cts.Token;
+            _logAction("Bot 啟動。");
+            Task.Run(() => RunBotLoop(token));
         } 
  
         public void Stop() 
@@ -54,32 +57,47 @@ namespace BloxFruitsBot
             } 
         } 
  
-        private async Task RunBotLoop(CancellationToken cancellationToken) 
-        { 
-            while (!cancellationToken.IsCancellationRequested) 
-            { 
-                // 這裡將是狀態機的核心邏輯，根據 Python 的決策來切換狀態 
-                // 目前先讓它保持在一個循環中，等待 Python 的回傳 
-                _logAction($"當前狀態: {CurrentState}"); 
-                await Task.Delay(1000, cancellationToken); // 每秒檢查一次 
-            } 
-        } 
+        private async Task RunBotLoop(CancellationToken cancellationToken)
+        {
+            try
+            {
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    // 這裡將是狀態機的核心邏輯，根據 Python 的決策來切換狀態
+                    // 目前先讓它保持在一個循環中，等待 Python 的回傳
+                    _logAction($"當前狀態: {CurrentState}");
+                    await Task.Delay(1000, cancellationToken); // 每秒檢查一次
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Stop() 取消時 Task.Delay 一定會丟這個例外。
+                // 這個迴圈是 fire-and-forget，不接住的話會變成沒人觀察的 Task 例外。
+            }
+        }
  
         public void ProcessPythonDecision(PythonResponse response) 
         { 
             _logAction($"處理 Python 決策: {response.DecisionIntent}"); 
             
-            // 根據決策更新狀態
+            // 根據決策更新狀態。
+            // 這裡必須認得「所有」意圖別名：舊版少了 CombatMode / InteractWithNPC，
+            // 一旦 AI 有給 ActionKeys 就走不到下面那個 switch，狀態會被誤設成 Idle。
             switch (response.DecisionIntent)
             {
                 case "Combat":
+                case "CombatMode":
                     CurrentState = BotState.Combat;
                     break;
                 case "Flee":
                 case "Navigate":
+                case "Explore":
+                case "Farm":
                     CurrentState = BotState.Navigate;
                     break;
                 case "Interact":
+                case "InteractWithNPC":
+                case "Collect":
                     CurrentState = BotState.GetQuest;
                     break;
                 default:

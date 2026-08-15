@@ -14,11 +14,11 @@ namespace BloxFruitsBot
         [JsonPropertyName("TargetVisible")] 
         public bool TargetVisible { get; set; } 
  
-        [JsonPropertyName("TargetId")] 
-        public string TargetId { get; set; } 
- 
-        [JsonPropertyName("DecisionIntent")] 
-        public string DecisionIntent { get; set; } 
+        [JsonPropertyName("TargetId")]
+        public string TargetId { get; set; } = string.Empty;
+
+        [JsonPropertyName("DecisionIntent")]
+        public string DecisionIntent { get; set; } = string.Empty;
 
         [JsonPropertyName("ActionKeys")]
         public System.Collections.Generic.List<string> ActionKeys { get; set; } = new System.Collections.Generic.List<string>();

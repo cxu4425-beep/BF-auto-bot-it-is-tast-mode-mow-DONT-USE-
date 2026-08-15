@@ -35,7 +35,8 @@ def decide(request: DecisionRequest):
                 "model": "llava:7b",
                 "prompt": prompt,
                 "images": [request.image_base64],
-                "temperature": 0.2,
+                # temperature 要放在 options 裡，放最外層 Ollama 會直接忽略掉。
+                "options": {"temperature": 0.2},
                 "stream": False
             },
             timeout=60
