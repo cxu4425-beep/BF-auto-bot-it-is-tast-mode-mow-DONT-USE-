@@ -8,7 +8,12 @@ echo ============================================
 echo.
 
 set "BOT_DIR=%~dp0"
-set "OLLAMA_MODEL=llava:7b"
+
+REM 視覺模型。qwen2.5vl:3b 是為 GUI/螢幕代理訓練的，約 3.2GB，
+REM 在 8GB 顯卡上留得下空間給遊戲本身。要換模型改這一行即可
+REM （main.py 與 fastapi_server.py 都讀 BOT_MODEL 這個環境變數）。
+set "OLLAMA_MODEL=qwen2.5vl:3b"
+set "BOT_MODEL=%OLLAMA_MODEL%"
 
 echo [1/4] Checking Python...
 where python >nul 2>nul

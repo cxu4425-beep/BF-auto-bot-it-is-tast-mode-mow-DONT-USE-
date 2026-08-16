@@ -1,5 +1,7 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Net.Http;
@@ -19,6 +21,23 @@ namespace BloxFruitsBot
         private static string _lastAction = "STARTUP";
         private static string _lastResult = "NONE"; // 第一輪還沒送過任何動作,不該騙AI說已經SUCCESS
         private static IntPtr _targetWindowHwnd = IntPtr.Zero;
+
+        // ── 可調參數（用環境變數覆寫，不必改程式碼重編）─────────────────
+        // 送給 AI 前的截圖寬度上限，設 0 表示不縮圖。
+        private static readonly int MaxImageWidth = ReadEnvInt("BOT_MAX_IMAGE_WIDTH", 800);
+
+        // 每輪之間的間隔（毫秒）。要設得比「模型單輪推論時間」長，
+        // 否則請求只會排隊堆積，Bot 看到的畫面永遠是過期的。
+        private static readonly int LoopDelayMs = ReadEnvInt("BOT_LOOP_DELAY_MS", 2000);
+
+        private static readonly string ApiUrl =
+            Environment.GetEnvironmentVariable("BOT_API_URL") ?? "http://localhost:8000/decide";
+
+        private static int ReadEnvInt(string name, int fallback)
+        {
+            string? raw = Environment.GetEnvironmentVariable(name);
+            return int.TryParse(raw, out int value) ? value : fallback;
+        }
 
         [STAThread]
         static async Task Main(string[] args)
@@ -65,7 +84,10 @@ namespace BloxFruitsBot
                     var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
 
                     // C. 【Http Receive】等待並解析 AI 決策結果
-                    var response = await _httpClient.PostAsync("http://localhost:8000/decide", content);
+                    Stopwatch sw = Stopwatch.StartNew();
+                    var response = await _httpClient.PostAsync(ApiUrl, content);
+                    sw.Stop();
+                    Console.WriteLine($"[System] AI 回應耗時: {sw.ElapsedMilliseconds} ms");
                     if (!response.IsSuccessStatusCode)
                     {
                         Console.WriteLine($"[錯誤] Python FastAPI 伺服器回報錯誤: {response.StatusCode}");
@@ -102,7 +124,7 @@ namespace BloxFruitsBot
                 }
 
                 // 物理動作延遲，避免過度頻繁戳 API 與發送過多操作
-                await Task.Delay(2000);
+                await Task.Delay(LoopDelayMs);
             }
         }
 
@@ -173,16 +195,52 @@ namespace BloxFruitsBot
         }
 
         /// <summary>
-        /// 轉碼 Helper: 將 Bitmap 轉成 Base64 字串
+        /// 轉碼 Helper: 先等比例縮圖，再轉成 Base64 字串。
+        ///
+        /// 縮圖是整條迴圈最大的效能槓桿。視覺模型的「看圖」成本和像素量成正比：
+        /// 1920x1080 在 Qwen2.5-VL 約 2,600 個 vision token，光讀圖就要 ~10 秒；
+        /// 縮到 800 寬只剩約 490 個 token，降到 ~2 秒。
+        /// 遊戲畫面判讀（有沒有怪、有沒有 NPC、是否卡牆）不需要原始解析度。
         /// </summary>
         private static string ConvertBitmapToBase64(Bitmap bitmap)
         {
-            using (MemoryStream ms = new MemoryStream())
+            Bitmap toEncode = bitmap;
+            bool needsDispose = false;
+
+            if (MaxImageWidth > 0 && bitmap.Width > MaxImageWidth)
             {
-                // 使用 JPEG 格式壓縮可以有效減少 Base64 封包大小與加速網路傳輸
-                bitmap.Save(ms, ImageFormat.Jpeg);
-                byte[] byteImage = ms.ToArray();
-                return Convert.ToBase64String(byteImage);
+                int targetHeight = (int)Math.Round(bitmap.Height * (MaxImageWidth / (double)bitmap.Width));
+                if (targetHeight < 1)
+                {
+                    targetHeight = 1;
+                }
+
+                toEncode = new Bitmap(MaxImageWidth, targetHeight, PixelFormat.Format24bppRgb);
+                using (Graphics g = Graphics.FromImage(toEncode))
+                {
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(bitmap, 0, 0, MaxImageWidth, targetHeight);
+                }
+                needsDispose = true;
+                Console.WriteLine($"[System] 截圖縮放: {bitmap.Width}x{bitmap.Height} -> {MaxImageWidth}x{targetHeight}");
+            }
+
+            try
+            {
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    // 使用 JPEG 格式壓縮可以有效減少 Base64 封包大小與加速網路傳輸
+                    toEncode.Save(ms, ImageFormat.Jpeg);
+                    byte[] byteImage = ms.ToArray();
+                    return Convert.ToBase64String(byteImage);
+                }
+            }
+            finally
+            {
+                if (needsDispose)
+                {
+                    toEncode.Dispose();
+                }
             }
         }
 

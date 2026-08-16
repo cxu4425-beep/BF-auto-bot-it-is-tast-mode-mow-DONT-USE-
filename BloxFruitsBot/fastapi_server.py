@@ -10,6 +10,7 @@
 """
 
 import json
+import os
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -17,6 +18,11 @@ from pydantic import BaseModel
 import ollama
 
 app = FastAPI()
+
+# 與 main.py 共用同一組環境變數，換模型只要設 BOT_MODEL 一處
+MODEL = os.getenv("BOT_MODEL", "qwen2.5vl:3b")
+NUM_PREDICT = int(os.getenv("BOT_NUM_PREDICT", "80"))
+KEEP_ALIVE = os.getenv("BOT_KEEP_ALIVE", "-1")
 
 # C# 端 Program.cs 的 DecisionRequest 送出的欄位名是 image_base64 / last_action / last_result，
 # 欄位名對不上 FastAPI 會直接回 422，AI 永遠收不到圖。
@@ -76,12 +82,13 @@ def decide(request: DecisionRequest):
 
     try:
         response = ollama.generate(
-            model="llava:7b",
+            model=MODEL,
             prompt=prompt,
             system=SYSTEM_PROMPT,
             images=[request.image_base64],
             format="json",
-            options={"temperature": 0.4, "num_predict": 256},
+            options={"temperature": 0.4, "num_predict": NUM_PREDICT},
+            keep_alive=KEEP_ALIVE,
         )
     except Exception as exc:
         # Ollama 沒開 / 模型沒載 -> 回一個安全的 IDLE，不要讓 C# 端整個迴圈掛掉
