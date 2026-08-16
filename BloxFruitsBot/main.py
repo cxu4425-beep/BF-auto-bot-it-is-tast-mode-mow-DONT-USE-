@@ -28,7 +28,18 @@ NUM_CTX = int(os.getenv("BOT_NUM_CTX", "4096"))
 
 # 讓模型常駐記憶體。Ollama 預設 5 分鐘沒用就卸載，
 # 下次請求要重新載入（實測約 12 秒）。Bot 是持續運轉的，不該付這個成本。
-KEEP_ALIVE = os.getenv("BOT_KEEP_ALIVE", "-1")
+#
+# 型別很重要：Ollama 的 keep_alive 只吃「數字（秒，-1 = 永久）」或
+# 「帶單位的時間字串（"5m"、"1h"）」。送出沒有單位的字串 "-1" 會讓
+# Go 的 duration parser 解析失敗，整個請求回 400。
+def _parse_keep_alive(raw: str):
+    try:
+        return int(raw)      # 純數字 -> 當成秒數送出（-1 代表永久常駐）
+    except ValueError:
+        return raw           # 例如 "10m"、"1h"，交給 Ollama 自己解析
+
+
+KEEP_ALIVE = _parse_keep_alive(os.getenv("BOT_KEEP_ALIVE", "-1"))
 
 
 class DecisionRequest(BaseModel):
@@ -81,8 +92,15 @@ def decide(request: DecisionRequest):
             # 注意：這裡不能用 raise HTTPException，因為下面的 except Exception
             # 會把它當成一般錯誤吃掉，永遠不會真的以 HTTP 500 回給 C# 端，
             # 反而會讓 C# 誤判成功。直接回傳一個安全的 fallback 決策即可。
+            # 一定要把回應內容印出來。只印狀態碼的話，像 400 這種「請求本身有問題」
+            # 的錯誤完全看不出是哪個欄位不合法，只能瞎猜。
+            detail = ollama_response.text.strip()
             print(f"❌ [錯誤] Ollama 服務異常，狀態碼: {ollama_response.status_code}")
-            return {"thought": f"Ollama service error: {ollama_response.status_code}", "action": "IDLE"}
+            print(f"   回應內容: {detail}")
+            return {
+                "thought": f"Ollama service error {ollama_response.status_code}: {detail}",
+                "action": "IDLE",
+            }
 
         generated_text = ollama_response.json().get("response", "").strip()
         

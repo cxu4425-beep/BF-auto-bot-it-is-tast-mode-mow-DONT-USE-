@@ -22,7 +22,18 @@ app = FastAPI()
 # 與 main.py 共用同一組環境變數，換模型只要設 BOT_MODEL 一處
 MODEL = os.getenv("BOT_MODEL", "qwen2.5vl:3b")
 NUM_PREDICT = int(os.getenv("BOT_NUM_PREDICT", "80"))
-KEEP_ALIVE = os.getenv("BOT_KEEP_ALIVE", "-1")
+
+
+# Ollama 的 keep_alive 只吃數字（秒，-1 = 永久）或帶單位的字串（"5m"）。
+# 沒有單位的字串 "-1" 會讓請求直接回 400，所以純數字要轉成 int 再送。
+def _parse_keep_alive(raw: str):
+    try:
+        return int(raw)
+    except ValueError:
+        return raw
+
+
+KEEP_ALIVE = _parse_keep_alive(os.getenv("BOT_KEEP_ALIVE", "-1"))
 
 # 見 main.py 的說明：預設的 128000 context 會讓 KV cache 吃掉約 5GB，
 # 模型塞不進 8GB VRAM 而被迫部分跑在 CPU 上。4096 對單張圖的請求綽綽有餘。
