@@ -34,6 +34,14 @@ namespace BloxFruitsBot
         private static readonly string ApiUrl =
             Environment.GetEnvironmentVariable("BOT_API_URL") ?? "http://localhost:8000/decide";
 
+        // 把送給 AI 的那張圖存檔（每輪覆寫），方便直接確認「AI 到底看到什麼」。
+        // 截圖抓錯視窗、抓到黑畫面或雜訊時，開這個檔案一眼就知道，不必從模型的
+        // 回答反推。設 BOT_SAVE_FRAME=0 可關閉。
+        private static readonly string? SaveFramePath =
+            Environment.GetEnvironmentVariable("BOT_SAVE_FRAME") == "0"
+                ? null
+                : Path.GetFullPath("last_frame.jpg");
+
         private static int ReadEnvInt(string name, int fallback)
         {
             string? raw = Environment.GetEnvironmentVariable(name);
@@ -109,7 +117,7 @@ namespace BloxFruitsBot
         /// 確保遊戲視窗在前景。
         ///
         /// 這對「截圖」和「送按鍵」都是必要的：
-        ///  - BitBlt 抓的是螢幕上該區域「當下顯示的像素」，不是視窗自己的畫面緩衝。
+        ///  - 截圖是從螢幕上該區域「當下顯示的像素」複製的，不是視窗自己的畫面緩衝。
         ///    遊戲被其他視窗蓋住時，截到的就是蓋在上面那個視窗。
         ///  - SendInput 走的是硬體輸入佇列，只會送到前景視窗。
         ///
@@ -161,6 +169,12 @@ namespace BloxFruitsBot
             else
             {
                 Console.WriteLine($"[OK] 成功連結到 '{windowTitle}' 遊戲視窗，HWND: {_targetWindowHwnd}");
+            }
+
+            if (SaveFramePath != null)
+            {
+                Console.WriteLine($"[OK] 每輪送給 AI 的畫面會存到: {SaveFramePath}");
+                Console.WriteLine("[提示] AI 判讀怪怪的時候，打開這個檔案就知道它實際看到什麼。");
             }
 
             // 2. 啟動 ReAct 自動化閉環
@@ -241,7 +255,7 @@ namespace BloxFruitsBot
             {
                 try
                 {
-                    // 截圖前一定要先把遊戲拉到前景，否則 BitBlt 抓到的是蓋在上面的視窗。
+                    // 截圖前一定要先把遊戲拉到前景，否則抓到的是蓋在上面的視窗。
                     // 少了這一步會形成死結：AI 看到終端機 -> 判斷 IDLE ->
                     // IDLE 不切換前景 -> 下一張還是終端機 -> 永遠 IDLE。
                     EnsureTargetForeground();
@@ -253,32 +267,26 @@ namespace BloxFruitsBot
 
                     if (width > 0 && height > 0)
                     {
+                        // 把客戶區左上角換算成螢幕座標，再從「螢幕」複製像素。
+                        //
+                        // 不能用 BitBlt 從視窗 DC 抓：Roblox 是 DirectX 硬體渲染，
+                        // GDI 看不到它的畫面內容，抓回來是黑畫面或雜訊。
+                        // 實測時 AI 收到的圖片從 41KB（終端機文字）暴增到 115KB，
+                        // 正是雜訊壓不掉的特徵，模型也因此退化成一直吐 "@@@@"。
+                        //
+                        // CopyFromScreen 讀的是桌面合成器（DWM）合成後的畫面，
+                        // DirectX 內容已經在裡面了。前面 EnsureTargetForeground()
+                        // 已保證遊戲在最上層，所以不會抓到別的視窗。
+                        var origin = new Win32.POINT { X = 0, Y = 0 };
+                        Win32.ClientToScreen(_targetWindowHwnd, ref origin);
+
                         Bitmap bmp = new Bitmap(width, height, PixelFormat.Format32bppArgb);
                         using (Graphics gfx = Graphics.FromImage(bmp))
                         {
-                            IntPtr hdcBitmap = gfx.GetHdc();
-                            // 用 GetDC（客戶區 DC）配 GetClientRect，原點才對得上。
-                            // GetWindowDC 的原點含標題列，會讓畫面整個往下偏、底部被裁掉。
-                            IntPtr hdcWindow = Win32.GetDC(_targetWindowHwnd);
-                            if (hdcWindow != IntPtr.Zero)
-                            {
-                                try
-                                {
-                                    Win32.BitBlt(hdcBitmap, 0, 0, width, height, hdcWindow, 0, 0, Win32.SRCCOPY);
-                                }
-                                finally
-                                {
-                                    gfx.ReleaseHdc(hdcBitmap);
-                                    Win32.ReleaseDC(_targetWindowHwnd, hdcWindow);
-                                }
-                                return bmp;
-                            }
-                            else
-                            {
-                                gfx.ReleaseHdc(hdcBitmap);
-                                bmp.Dispose();
-                            }
+                            gfx.CopyFromScreen(origin.X, origin.Y, 0, 0,
+                                               new Size(width, height), CopyPixelOperation.SourceCopy);
                         }
+                        return bmp;
                     }
                 }
                 catch (Exception ex)
@@ -341,6 +349,20 @@ namespace BloxFruitsBot
                     // 使用 JPEG 格式壓縮可以有效減少 Base64 封包大小與加速網路傳輸
                     toEncode.Save(ms, ImageFormat.Jpeg);
                     byte[] byteImage = ms.ToArray();
+
+                    if (SaveFramePath != null)
+                    {
+                        try
+                        {
+                            File.WriteAllBytes(SaveFramePath, byteImage);
+                        }
+                        catch (Exception ex)
+                        {
+                            // 純診斷用途，寫檔失敗不該影響主流程
+                            Console.WriteLine($"[警告] 無法寫入診斷截圖: {ex.Message}");
+                        }
+                    }
+
                     return Convert.ToBase64String(byteImage);
                 }
             }

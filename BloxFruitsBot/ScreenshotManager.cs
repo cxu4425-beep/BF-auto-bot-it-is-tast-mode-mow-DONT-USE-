@@ -41,43 +41,28 @@ namespace BloxFruitsBot
                 Directory.CreateDirectory(saveDirectory);
             }
 
-            // 用 GetDC（客戶區 DC）而不是 GetWindowDC，原點才會和 GetClientRect 對齊，
-            // 否則截出來的圖會被標題列往下推、底部被裁掉。
-            IntPtr hdcWindow = Win32.GetDC(hWnd);
-            if (hdcWindow == IntPtr.Zero)
-            {
-                throw new InvalidOperationException("無法取得視窗 DC (GetDC 失敗)。");
-            }
+            // 把客戶區左上角換算成螢幕座標，再從螢幕複製像素。
+            //
+            // 不用 BitBlt 從視窗 DC 抓：Roblox 之類的 DirectX 遊戲是硬體渲染，
+            // GDI 讀不到它的畫面內容，抓回來會是黑畫面或雜訊。
+            // CopyFromScreen 讀的是桌面合成器（DWM）合成後的結果，含 DirectX 內容。
+            //
+            // 代價是遊戲必須在前景且沒被遮住，呼叫端要自行確保這點。
+            var origin = new Win32.POINT { X = 0, Y = 0 };
+            Win32.ClientToScreen(hWnd, ref origin);
 
-            try
+            using (Bitmap bmp = new Bitmap(width, height, PixelFormat.Format32bppArgb))
             {
-                using (Bitmap bmp = new Bitmap(width, height, PixelFormat.Format32bppArgb))
+                using (Graphics gfx = Graphics.FromImage(bmp))
                 {
-                    using (Graphics gfx = Graphics.FromImage(bmp))
-                    {
-                        IntPtr hdcBitmap = gfx.GetHdc();
-                        try
-                        {
-                            if (!Win32.BitBlt(hdcBitmap, 0, 0, width, height, hdcWindow, 0, 0, Win32.SRCCOPY))
-                            {
-                                throw new InvalidOperationException("BitBlt 截圖失敗。");
-                            }
-                        }
-                        finally
-                        {
-                            gfx.ReleaseHdc(hdcBitmap);
-                        }
-                    }
-
-                    string fileName = $"screenshot_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png";
-                    string fullPath = Path.GetFullPath(Path.Combine(saveDirectory, fileName));
-                    bmp.Save(fullPath, ImageFormat.Png);
-                    return fullPath;
+                    gfx.CopyFromScreen(origin.X, origin.Y, 0, 0,
+                                       new Size(width, height), CopyPixelOperation.SourceCopy);
                 }
-            }
-            finally
-            {
-                Win32.ReleaseDC(hWnd, hdcWindow);
+
+                string fileName = $"screenshot_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png";
+                string fullPath = Path.GetFullPath(Path.Combine(saveDirectory, fileName));
+                bmp.Save(fullPath, ImageFormat.Png);
+                return fullPath;
             }
         }
     }
