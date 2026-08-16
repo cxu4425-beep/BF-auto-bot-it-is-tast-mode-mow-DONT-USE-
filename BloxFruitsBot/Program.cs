@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -39,6 +40,102 @@ namespace BloxFruitsBot
             return int.TryParse(raw, out int value) ? value : fallback;
         }
 
+        /// <summary>
+        /// 以「標題包含關鍵字」尋找遊戲視窗。
+        /// FindWindow 只認完全相符的標題，但遊戲視窗標題常常帶額外後綴，
+        /// 一找不到就會悄悄退回全螢幕截圖，AI 就只能看到桌面。
+        /// </summary>
+        private static IntPtr FindGameWindow(string titleContains)
+        {
+            // 先試完全相符，命中就不用列舉了
+            IntPtr exact = Win32.FindWindow(null, titleContains);
+            if (exact != IntPtr.Zero)
+            {
+                return exact;
+            }
+
+            IntPtr found = IntPtr.Zero;
+            Win32.EnumWindows((hWnd, _) =>
+            {
+                if (!Win32.IsWindowVisible(hWnd))
+                {
+                    return true;
+                }
+
+                string title = GetWindowTitle(hWnd);
+                if (title.IndexOf(titleContains, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    found = hWnd;
+                    return false; // 找到就停止列舉
+                }
+                return true;
+            }, IntPtr.Zero);
+
+            return found;
+        }
+
+        private static string GetWindowTitle(IntPtr hWnd)
+        {
+            int length = Win32.GetWindowTextLength(hWnd);
+            if (length <= 0)
+            {
+                return string.Empty;
+            }
+
+            var sb = new StringBuilder(length + 1);
+            Win32.GetWindowText(hWnd, sb, sb.Capacity);
+            return sb.ToString();
+        }
+
+        private static List<string> ListWindowTitles()
+        {
+            var titles = new List<string>();
+            Win32.EnumWindows((hWnd, _) =>
+            {
+                if (Win32.IsWindowVisible(hWnd))
+                {
+                    string title = GetWindowTitle(hWnd);
+                    if (!string.IsNullOrWhiteSpace(title))
+                    {
+                        titles.Add(title);
+                    }
+                }
+                return true;
+            }, IntPtr.Zero);
+            return titles;
+        }
+
+        /// <summary>
+        /// 確保遊戲視窗在前景。
+        ///
+        /// 這對「截圖」和「送按鍵」都是必要的：
+        ///  - BitBlt 抓的是螢幕上該區域「當下顯示的像素」，不是視窗自己的畫面緩衝。
+        ///    遊戲被其他視窗蓋住時，截到的就是蓋在上面那個視窗。
+        ///  - SendInput 走的是硬體輸入佇列，只會送到前景視窗。
+        ///
+        /// 已經在前景時直接返回，不浪費那 120ms。
+        /// </summary>
+        private static void EnsureTargetForeground()
+        {
+            if (_targetWindowHwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            if (Win32.GetForegroundWindow() == _targetWindowHwnd)
+            {
+                return;
+            }
+
+            if (Win32.IsIconic(_targetWindowHwnd))
+            {
+                Win32.ShowWindow(_targetWindowHwnd, Win32.SW_RESTORE);
+            }
+
+            Win32.SetForegroundWindow(_targetWindowHwnd);
+            Thread.Sleep(120); // 給系統時間真正完成焦點切換
+        }
+
         [STAThread]
         static async Task Main(string[] args)
         {
@@ -47,12 +144,19 @@ namespace BloxFruitsBot
             Console.WriteLine("    🤖 ReAct AI Game Bot - C# 遊戲控制端 (Console)");
             Console.WriteLine("====================================================");
 
-            // 1. 尋找特定遊戲視窗 (預設為 Roblox)
-            string windowTitle = "Roblox";
-            _targetWindowHwnd = Win32.FindWindow(null, windowTitle);
+            // 1. 尋找特定遊戲視窗 (預設為 Roblox，可用 BOT_WINDOW_TITLE 覆寫)
+            string windowTitle = Environment.GetEnvironmentVariable("BOT_WINDOW_TITLE") ?? "Roblox";
+            _targetWindowHwnd = FindGameWindow(windowTitle);
             if (_targetWindowHwnd == IntPtr.Zero)
             {
-                Console.WriteLine($"[警告] 未找到標題為 '{windowTitle}' 的視窗，將使用主螢幕進行截圖！");
+                Console.WriteLine($"[警告] 未找到標題含 '{windowTitle}' 的視窗，將使用主螢幕進行截圖！");
+                Console.WriteLine("[警告] 這代表 AI 看到的是你的桌面而不是遊戲畫面，決策不會有意義。");
+                Console.WriteLine("[提示] 目前可見的視窗標題：");
+                foreach (string t in ListWindowTitles())
+                {
+                    Console.WriteLine($"         - {t}");
+                }
+                Console.WriteLine("[提示] 用環境變數指定正確標題，例如： $env:BOT_WINDOW_TITLE=\"Roblox\"");
             }
             else
             {
@@ -137,6 +241,11 @@ namespace BloxFruitsBot
             {
                 try
                 {
+                    // 截圖前一定要先把遊戲拉到前景，否則 BitBlt 抓到的是蓋在上面的視窗。
+                    // 少了這一步會形成死結：AI 看到終端機 -> 判斷 IDLE ->
+                    // IDLE 不切換前景 -> 下一張還是終端機 -> 永遠 IDLE。
+                    EnsureTargetForeground();
+
                     Win32.RECT rect;
                     Win32.GetClientRect(_targetWindowHwnd, out rect);
                     int width = rect.Right - rect.Left;
@@ -304,8 +413,7 @@ namespace BloxFruitsBot
             // 1. 先把遊戲視窗拉到最前面並取得焦點
             //    (PostMessage 送背景訊息 Roblox 完全不吃，必須真的是前景視窗
             //     SendInput 才會被遊戲引擎的硬體輸入判斷讀到)
-            Win32.SetForegroundWindow(_targetWindowHwnd);
-            Thread.Sleep(80); // 給系統一點時間真正切換焦點
+            EnsureTargetForeground();
 
             ushort scanCode = (ushort)Win32.MapVirtualKey((uint)vk, Win32.MAPVK_VK_TO_VSC);
 
@@ -338,8 +446,7 @@ namespace BloxFruitsBot
         {
             Console.WriteLine("[Action] 前景發送滑鼠左鍵點擊");
 
-            Win32.SetForegroundWindow(_targetWindowHwnd);
-            Thread.Sleep(80);
+            EnsureTargetForeground();
 
             Win32.RECT rect;
             Win32.GetClientRect(_targetWindowHwnd, out rect);
