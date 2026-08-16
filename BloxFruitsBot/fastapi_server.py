@@ -24,6 +24,10 @@ MODEL = os.getenv("BOT_MODEL", "qwen2.5vl:3b")
 NUM_PREDICT = int(os.getenv("BOT_NUM_PREDICT", "80"))
 KEEP_ALIVE = os.getenv("BOT_KEEP_ALIVE", "-1")
 
+# 見 main.py 的說明：預設的 128000 context 會讓 KV cache 吃掉約 5GB，
+# 模型塞不進 8GB VRAM 而被迫部分跑在 CPU 上。4096 對單張圖的請求綽綽有餘。
+NUM_CTX = int(os.getenv("BOT_NUM_CTX", "4096"))
+
 # C# 端 Program.cs 的 DecisionRequest 送出的欄位名是 image_base64 / last_action / last_result，
 # 欄位名對不上 FastAPI 會直接回 422，AI 永遠收不到圖。
 class DecisionRequest(BaseModel):
@@ -87,7 +91,7 @@ def decide(request: DecisionRequest):
             system=SYSTEM_PROMPT,
             images=[request.image_base64],
             format="json",
-            options={"temperature": 0.4, "num_predict": NUM_PREDICT},
+            options={"temperature": 0.4, "num_predict": NUM_PREDICT, "num_ctx": NUM_CTX},
             keep_alive=KEEP_ALIVE,
         )
     except Exception as exc:

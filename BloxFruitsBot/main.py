@@ -16,6 +16,16 @@ MODEL = os.getenv("BOT_MODEL", "qwen2.5vl:3b")
 # 給 80 已經很寬鬆。不設上限的話模型可能長篇大論，每多 26 個 token 就多花 1 秒。
 NUM_PREDICT = int(os.getenv("BOT_NUM_PREDICT", "80"))
 
+# Context window。這是 8GB 顯卡上最關鍵的一個參數。
+# Ollama 對 qwen2.5vl:3b 預設開 128000，光 KV cache 就吃掉約 5GB，
+# 整個模型變成 8.4GB 塞不進 8GB VRAM，導致 36% 的層被丟到 CPU 跑
+# （實測 eval 只剩 30 tok/s，全上 GPU 應有 80~120）。
+#
+# 這個 Bot 每輪都是獨立請求、沒有對話歷史，用量是：
+#   圖片 ~460 token（800px 寬）+ 提示 ~150 + 輸出 ~80 = 不到 700
+# 4096 已有五倍餘裕，KV cache 縮到約 150MB，模型就能完全放進 GPU。
+NUM_CTX = int(os.getenv("BOT_NUM_CTX", "4096"))
+
 # 讓模型常駐記憶體。Ollama 預設 5 分鐘沒用就卸載，
 # 下次請求要重新載入（實測約 12 秒）。Bot 是持續運轉的，不該付這個成本。
 KEEP_ALIVE = os.getenv("BOT_KEEP_ALIVE", "-1")
@@ -56,7 +66,11 @@ def decide(request: DecisionRequest):
                 "images": [request.image_base64],
                 # 💥 核心修正：移除 "format": "json"，徹底解放 AI 的嘴巴！
                 # temperature 要放在 options 裡，放最外層 Ollama 會直接忽略掉。
-                "options": {"temperature": 0.2, "num_predict": NUM_PREDICT},
+                "options": {
+                    "temperature": 0.2,
+                    "num_predict": NUM_PREDICT,
+                    "num_ctx": NUM_CTX,
+                },
                 "keep_alive": KEEP_ALIVE,
                 "stream": False
             },
