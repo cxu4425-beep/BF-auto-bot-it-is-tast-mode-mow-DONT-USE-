@@ -24,8 +24,16 @@ namespace BloxFruitsBot
         private static IntPtr _targetWindowHwnd = IntPtr.Zero;
 
         // ── 可調參數（用環境變數覆寫，不必改程式碼重編）─────────────────
+        //
         // 送給 AI 前的截圖寬度上限，設 0 表示不縮圖。
-        private static readonly int MaxImageWidth = ReadEnvInt("BOT_MAX_IMAGE_WIDTH", 800);
+        //
+        // 400 是實測出來的值，不是猜的。用同一張遊戲截圖對 qwen2.5vl:3b 測：
+        //     800px → 模型退化成一整串 "@"（放大 context 到 16384 也一樣）
+        //     400px → 正確描述出「角色坐在沙發上，周圍是家具」
+        //     200px → 開始幻覺，把畫面說成 Minecraft
+        // 所以可用區間有上下界，400 落在中間。
+        // 太大會讓模型崩掉、太小會讓它看不清楚，兩邊都不是線性劣化。
+        private static readonly int MaxImageWidth = ReadEnvInt("BOT_MAX_IMAGE_WIDTH", 400);
 
         // 每輪之間的間隔（毫秒）。要設得比「模型單輪推論時間」長，
         // 否則請求只會排隊堆積，Bot 看到的畫面永遠是過期的。
