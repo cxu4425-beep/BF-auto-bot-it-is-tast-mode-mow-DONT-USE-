@@ -78,28 +78,66 @@ ACTION_LIST = (
 
 VALID_ACTIONS = {a.strip() for a in ACTION_LIST.split(",")}
 
+# 模型自然會用的講法 -> 我們的動作名稱。
+#
+# 實測 120 步裡，模型有 9 次輸出 "INTERACT"（它看到畫面上的 Interact 提示，
+# 很合理地就這樣講），但清單裡叫 TALK_TO_NPC，名字對不上就整個被丟掉。
+# 與其逼模型記住我們的命名，不如在這裡接住它的說法。
+ACTION_ALIASES = {
+    "INTERACT": "TALK_TO_NPC",
+    "INTERACT_WITH_NPC": "TALK_TO_NPC",
+    "TALK": "TALK_TO_NPC",
+    "TALK_TO": "TALK_TO_NPC",
+    "ACCEPT_QUEST": "TALK_TO_NPC",
+    "MOVE": "MOVE_FORWARD",
+    "FORWARD": "MOVE_FORWARD",
+    "WALK": "MOVE_FORWARD",
+    "WALK_FORWARD": "MOVE_FORWARD",
+    "GO_FORWARD": "MOVE_FORWARD",
+    "LEFT": "TURN_LEFT",
+    "RIGHT": "TURN_RIGHT",
+    "FIGHT": "ATTACK",
+    "HIT": "ATTACK",
+    "CLICK": "ATTACK",
+    "ATTACK_ENEMY": "ATTACK",
+    "WAIT": "IDLE",
+    "STAY": "IDLE",
+    "NOTHING": "IDLE",
+    "STAND_STILL": "IDLE",
+    "DO_NOTHING": "IDLE",
+}
+
 
 def normalise_action(raw: str) -> str:
     """把模型吐出來的動作整理成 C# 動作表認得的字串。
 
-    模型很常在後面多加標點（"IDLE."）或補上說明
-    （"MOVE_FORWARD (to reach the NPC)"）。這些都對不上動作表，
-    C# 端會整個當成未知動作丟掉 —— 一個原本有效的決策就這樣消失。
+    要處理三種情況，每一種實測都真的發生過：
+      "IDLE."                          -> 尾端標點
+      "Move Forward"                   -> 用空格而不是底線
+      "INTERACT"                       -> 用它自己的講法，不是我們的命名
+      "MOVE_FORWARD (to reach the NPC)" -> 後面補了說明
+    對不上就等於整個決策被丟掉，而且從外面看起來就只是「AI 決定不動」。
     """
     if not raw:
         return ""
 
-    # 先取第一個詞，把 "MOVE_FORWARD (to reach the NPC)" 的說明切掉
-    first = raw.strip().upper().split()[0] if raw.strip() else ""
-    cleaned = re.sub(r"[^A-Z_]", "", first)  # 去掉句點、逗號等標點
-    if cleaned in VALID_ACTIONS:
-        return cleaned
+    # 空白與連字號一律當成底線，"Move Forward" 才對得上 MOVE_FORWARD
+    text = re.sub(r"[\s\-]+", "_", raw.strip().upper())
 
-    # 退一步：整句裡找得到哪個合法動作就用它
-    upper = raw.upper()
+    # 取到第一個非字母底線為止，切掉括號說明與標點
+    first = re.split(r"[^A-Z_]", text, maxsplit=1)[0].strip("_")
+    if first in VALID_ACTIONS:
+        return first
+    if first in ACTION_ALIASES:
+        return ACTION_ALIASES[first]
+
+    # 退一步：整句裡找得到就用。只比對夠長的字串，避免誤中
     for action in VALID_ACTIONS:
-        if action in upper:
+        if action in text:
             return action
+    for alias, target in sorted(ACTION_ALIASES.items(), key=lambda kv: -len(kv[0])):
+        if len(alias) >= 6 and alias in text:
+            return target
 
     return ""
 
@@ -126,29 +164,48 @@ def build_prompt(frame_count: int, last_result: str) -> str:
     # Ollama 會依模型的 Modelfile 套上正確的模板；
     # 舊版手動塞了 LLaVA 的 "USER: <image> ... ASSISTANT:"，
     # 換成 qwen2.5vl / gemma3 等模型時會變成雙重包裝，反而干擾模型。
+    #
+    # 這段目標描述是必要的。舊版只叫模型「描述畫面、判斷上個動作有沒有生效」，
+    # 沒告訴它自己在玩遊戲、要達成什麼 —— 實測 120 步有 113 步是 IDLE，
+    # 連站在任務 NPC 面前都一樣。它變成一個稱職的旁白，而不是玩家。
+    goal = (
+        "You are playing the game Blox Fruits. You are not describing it, you are "
+        "controlling the character. Decide the single best next action.\n"
+        "Priorities, highest first:\n"
+        "1. An 'Interact' prompt, a quest marker, or an NPC is visible -> TALK_TO_NPC\n"
+        "2. An enemy or monster is visible -> ATTACK\n"
+        "3. Otherwise explore to find quests and enemies -> MOVE_FORWARD, "
+        "or TURN_LEFT / TURN_RIGHT if something is blocking the way\n"
+        "4. Blocked and turning did not help -> JUMP\n"
+        "Use IDLE only on a loading screen or a menu where no action applies. "
+        "While in the game world, standing still is almost never correct.\n\n"
+    )
+
     if frame_count > 1:
         head = (
-            f"You are given {frame_count} consecutive frames from a game, oldest first, "
-            "about one second apart. The LAST image is the current screen.\n"
+            f"You are given {frame_count} consecutive frames, oldest first, about one "
+            "second apart. The LAST image is the current screen.\n"
             f"The last key/action sent to the game was: {last_result}.\n"
-            "Compare the frames to judge whether that action actually worked - "
-            "whether the player moved, is stuck against an obstacle, took damage, "
-            "or nothing changed. Base your decision on the current (last) frame.\n"
+            "Compare the frames to judge whether it worked - whether the character "
+            "moved, is stuck against an obstacle, or nothing changed. If the last "
+            "action changed nothing, do something different this time.\n"
         )
     else:
         head = (
-            f"Analyze this game screen. The last key/action sent to the game was: {last_result}.\n"
+            f"The last key/action sent to the game was: {last_result}.\n"
             "This only tells you which key was pressed, not whether it worked - "
             "judge success or failure yourself from the image.\n"
         )
 
     # ACTION 必須是 Program.cs 的對應表認得的固定指令，
-    # 不然 AI 自己造詞（"move_cursor"、"Wait"）永遠對不上，會被當成 IDLE 忽略。
+    # 不然 AI 自己造詞永遠對不上（實測它很愛講 "INTERACT"）。
+    # normalise_action() 會接住常見的講法，但提示詞先講清楚還是比較省事。
     return (
-        head
-        + "Reply using this exact template, nothing else:\n"
-        "THOUGHT: (what you see, one short sentence)\n"
-        f"ACTION: (exactly ONE word from this list: {ACTION_LIST})"
+        goal
+        + head
+        + "\nReply using this exact template, nothing else:\n"
+        "THOUGHT: (what you see and why you chose the action, one short sentence)\n"
+        f"ACTION: (exactly ONE word from this list, spelled exactly: {ACTION_LIST})"
     )
 
 
