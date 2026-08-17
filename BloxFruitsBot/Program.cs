@@ -272,6 +272,18 @@ namespace BloxFruitsBot
                         _lastResult = ExecuteGameAction(decision.Action);
                     }
                 }
+                catch (HttpRequestException ex)
+                {
+                    // AI 伺服器沒開或掛掉。原本會照一般迴圈間隔（預設 200ms）
+                    // 一直重試，等於在洗畫面。這種錯誤退遠一點再試。
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"[連線錯誤] 連不上 AI 伺服器 ({ApiUrl}): {ex.Message}");
+                    Console.WriteLine("[提示] 檢查 AI Server 那個視窗是否還開著（python main.py）。");
+                    Console.ResetColor();
+                    _lastResult = "API_UNREACHABLE";
+                    await Task.Delay(3000);
+                    continue;
+                }
                 catch (Exception ex)
                 {
                     Console.ForegroundColor = ConsoleColor.Red;

@@ -76,6 +76,33 @@ ACTION_LIST = (
     "TALK_TO_NPC, SWITCH_CHANNEL, RECONNECT, IDLE"
 )
 
+VALID_ACTIONS = {a.strip() for a in ACTION_LIST.split(",")}
+
+
+def normalise_action(raw: str) -> str:
+    """把模型吐出來的動作整理成 C# 動作表認得的字串。
+
+    模型很常在後面多加標點（"IDLE."）或補上說明
+    （"MOVE_FORWARD (to reach the NPC)"）。這些都對不上動作表，
+    C# 端會整個當成未知動作丟掉 —— 一個原本有效的決策就這樣消失。
+    """
+    if not raw:
+        return ""
+
+    # 先取第一個詞，把 "MOVE_FORWARD (to reach the NPC)" 的說明切掉
+    first = raw.strip().upper().split()[0] if raw.strip() else ""
+    cleaned = re.sub(r"[^A-Z_]", "", first)  # 去掉句點、逗號等標點
+    if cleaned in VALID_ACTIONS:
+        return cleaned
+
+    # 退一步：整句裡找得到哪個合法動作就用它
+    upper = raw.upper()
+    for action in VALID_ACTIONS:
+        if action in upper:
+            return action
+
+    return ""
+
 
 class DecisionRequest(BaseModel):
     # images 是多影格版本（由舊到新）。image_base64 是單張的舊欄位，
@@ -201,13 +228,20 @@ def decide(request: DecisionRequest):
             
         action_match = re.search(r"ACTION:\s*(.*)", generated_text, re.IGNORECASE)
         if action_match:
-            action = action_match.group(1).split("\n")[0].strip()
-            
+            raw_action = action_match.group(1).split("\n")[0].strip()
+            action = normalise_action(raw_action)
+            if not action:
+                print(f"⚠️  [警告] 無法對應的動作 {raw_action!r}，改用 IDLE")
+                action = "IDLE"
+            elif action != raw_action:
+                # 例如 "IDLE." -> "IDLE"。留一行紀錄，之後才看得出模型的輸出習慣
+                print(f"ℹ️  [提示] 動作已正規化: {raw_action!r} -> {action}")
+
         # 安全網：如果 AI 真的沒按格式來，就把整段話當作 thought，至少不留白
         if not thought and not action:
             thought = generated_text
             action = "IDLE"
-            
+
     except Exception as e:
         print(f"❌ [錯誤] 呼叫或解析 Ollama 失敗: {str(e)}")
         thought, action = f"Error: {str(e)}", "IDLE"
