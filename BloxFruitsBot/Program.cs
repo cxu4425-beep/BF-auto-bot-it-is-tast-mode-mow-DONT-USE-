@@ -177,6 +177,12 @@ namespace BloxFruitsBot
                 Console.WriteLine("[提示] AI 判讀怪怪的時候，打開這個檔案就知道它實際看到什麼。");
             }
 
+            Console.WriteLine("[OK] 目前的動作對應（用 BOT_ACTION_<動作名> 可覆寫）：");
+            foreach (var pair in ActionMap)
+            {
+                Console.WriteLine($"         {pair.Key,-16} -> {pair.Value}");
+            }
+
             // 2. 啟動 ReAct 自動化閉環
             int step = 1;
             while (true)
@@ -388,43 +394,107 @@ namespace BloxFruitsBot
             try
             {
                 string actionUpper = action.Trim().ToUpper();
-                switch (actionUpper)
+
+                if (!ActionMap.TryGetValue(actionUpper, out string? input))
                 {
-                    case "MOVE_FORWARD":
-                        SendKeyPress(Win32.VK_W);
-                        break;
-                    case "TURN_LEFT":
-                        SendKeyPress(Win32.VK_A);
-                        break;
-                    case "TURN_RIGHT":
-                        SendKeyPress(Win32.VK_D);
-                        break;
-                    case "JUMP":
-                        SendKeyPress(Win32.VK_SPACE);
-                        break;
-                    case "ATTACK":
-                        SendMouseClick();
-                        break;
-                    case "TALK_TO_NPC":
-                        SendKeyPress(Win32.VK_E); // 假設 E 鍵為與 NPC 互動/對話
-                        break;
-                    case "SWITCH_CHANNEL":
-                        SendKeyPress(Win32.VK_TAB); // 模擬切換頻道的操作
-                        break;
-                    case "RECONNECT":
-                        SendKeyPress(Win32.VK_ESCAPE); // 模擬連線超時自我修復
-                        break;
-                    case "IDLE":
-                    default:
-                        Console.WriteLine("[Action] 保持原地靜止 (IDLE)");
-                        break;
+                    Console.WriteLine($"[Action] 未知動作 '{actionUpper}'，當成 IDLE 忽略");
+                    return "IDLE";
                 }
+
+                if (input.Equals("NONE", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine("[Action] 保持原地靜止 (IDLE)");
+                }
+                else if (input.Equals("CLICK", StringComparison.OrdinalIgnoreCase))
+                {
+                    SendMouseClick();
+                }
+                else
+                {
+                    int vk = GetVirtualKeyCode(input);
+                    if (vk == 0)
+                    {
+                        Console.WriteLine($"[Action] 無法解析按鍵名稱 '{input}'（動作 {actionUpper}）");
+                        return $"FAILED_BAD_KEY_{input}";
+                    }
+                    SendKeyPress(vk);
+                }
+
                 return actionUpper; // 誠實回報剛剛送出的動作,而不是騙AI說永遠SUCCESS,避免文字提示汙染畫面判讀
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[Action] 執行按鍵失敗: {ex.Message}");
                 return $"FAILED_{ex.Message}";
+            }
+        }
+
+        /// <summary>
+        /// 動作名稱 -> 實際輸入的對應表。
+        ///
+        /// 每一項都可以用環境變數覆寫，不必改程式碼重編，例如：
+        ///     $env:BOT_ACTION_TALK_TO_NPC = "CLICK"
+        ///     $env:BOT_ACTION_JUMP        = "SPACE"
+        /// 值可以是單一按鍵名稱（W / A / E / SPACE / TAB / ESC / 1 / 2 ...）、
+        /// "CLICK"（滑鼠左鍵點畫面中心）或 "NONE"（不做事）。
+        /// </summary>
+        private static readonly Dictionary<string, string> ActionMap = BuildActionMap();
+
+        private static Dictionary<string, string> BuildActionMap()
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["MOVE_FORWARD"] = "W",
+                ["TURN_LEFT"] = "A",
+                ["TURN_RIGHT"] = "D",
+                ["JUMP"] = "SPACE",
+                ["ATTACK"] = "CLICK",
+
+                // Blox Fruits 的任務 NPC 是點畫面上的 Interact 按鈕，不是按 E。
+                // 這裡原本寫死成 E 並註明「假設」，實測結果是 E 在這款遊戲
+                // 綁的是見聞色 —— 想接任務卻開了見聞色。
+                ["TALK_TO_NPC"] = "CLICK",
+
+                ["SWITCH_CHANNEL"] = "TAB",
+                ["RECONNECT"] = "ESC",
+                ["IDLE"] = "NONE",
+            };
+
+            var names = new List<string>(map.Keys);
+            foreach (string name in names)
+            {
+                string? overridden = Environment.GetEnvironmentVariable("BOT_ACTION_" + name);
+                if (!string.IsNullOrWhiteSpace(overridden))
+                {
+                    map[name] = overridden.Trim();
+                }
+            }
+            return map;
+        }
+
+        private static int GetVirtualKeyCode(string keyName)
+        {
+            string key = keyName.Trim().ToUpper();
+
+            if (key.Length == 1)
+            {
+                char c = key[0];
+                if (c >= 'A' && c <= 'Z') return Win32.VK_A + (c - 'A');
+                if (c >= '0' && c <= '9') return Win32.VK_0 + (c - '0');
+            }
+
+            switch (key)
+            {
+                case "SPACE": return Win32.VK_SPACE;
+                case "TAB": return Win32.VK_TAB;
+                case "ESC":
+                case "ESCAPE": return Win32.VK_ESCAPE;
+                case "SHIFT": return Win32.VK_SHIFT;
+                case "CTRL":
+                case "CONTROL": return Win32.VK_CONTROL;
+                case "ENTER":
+                case "RETURN": return Win32.VK_RETURN;
+                default: return 0;
             }
         }
 
