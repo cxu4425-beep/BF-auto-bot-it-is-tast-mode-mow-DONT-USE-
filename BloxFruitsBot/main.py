@@ -26,6 +26,35 @@ NUM_PREDICT = int(os.getenv("BOT_NUM_PREDICT", "80"))
 # 4096 已有五倍餘裕，KV cache 縮到約 150MB，模型就能完全放進 GPU。
 NUM_CTX = int(os.getenv("BOT_NUM_CTX", "4096"))
 
+# 取樣參數。原本寫死 temperature=0.2，但實測 qwen2.5vl:3b 在複雜的遊戲畫面上
+# 會退化成不斷重複同一個字元（整串 "@@@@@@"）。溫度太低是小模型陷入
+# 重複迴圈的典型成因，配合 repeat_penalty 一起調才穩。
+# 格式遵循（THOUGHT/ACTION）在 0.5 附近仍然可靠。
+TEMPERATURE = float(os.getenv("BOT_TEMPERATURE", "0.5"))
+REPEAT_PENALTY = float(os.getenv("BOT_REPEAT_PENALTY", "1.15"))
+
+
+def looks_degenerate(text: str) -> bool:
+    """偵測模型是否陷入重複迴圈。
+
+    典型症狀是同一個字元連續出現一長串。這種回覆解析出來是空的，
+    會被當成 IDLE 靜靜吞掉，看起來像「AI 決定不動」，
+    實際上是模型壞掉了 —— 必須明確區分這兩種情況。
+    """
+    stripped = "".join(text.split())
+    if len(stripped) < 12:
+        return False
+
+    # 連續 12 個以上相同字元
+    run = 1
+    for prev, cur in zip(stripped, stripped[1:]):
+        run = run + 1 if cur == prev else 1
+        if run >= 12:
+            return True
+
+    # 整段只用了極少數不同字元
+    return len(set(stripped)) <= 2
+
 # 讓模型常駐記憶體。Ollama 預設 5 分鐘沒用就卸載，
 # 下次請求要重新載入（實測約 12 秒）。Bot 是持續運轉的，不該付這個成本。
 #
@@ -78,7 +107,8 @@ def decide(request: DecisionRequest):
                 # 💥 核心修正：移除 "format": "json"，徹底解放 AI 的嘴巴！
                 # temperature 要放在 options 裡，放最外層 Ollama 會直接忽略掉。
                 "options": {
-                    "temperature": 0.2,
+                    "temperature": TEMPERATURE,
+                    "repeat_penalty": REPEAT_PENALTY,
                     "num_predict": NUM_PREDICT,
                     "num_ctx": NUM_CTX,
                 },
@@ -103,12 +133,24 @@ def decide(request: DecisionRequest):
             }
 
         generated_text = ollama_response.json().get("response", "").strip()
-        
+
         # 🔍 終端機大亮點：這行能讓我們看見 AI 到底有沒有吐字！
         print("-" * 40)
         print(f"🤖 [AI 原始純文字回覆]:\n{generated_text}")
         print("-" * 40)
-        
+
+        # 模型陷入重複迴圈時，正則解析不到 THOUGHT/ACTION，結果會被安全網
+        # 當成一般的 IDLE 送回去 —— 看起來像「AI 決定不動」，其實是模型壞了。
+        # 明確標記出來，才不會把故障誤讀成決策。
+        if looks_degenerate(generated_text):
+            print("⚠️  [警告] 模型輸出退化成重複字元，這不是有效決策。")
+            print(f"   目前 temperature={TEMPERATURE}, repeat_penalty={REPEAT_PENALTY}")
+            print("   可調高 BOT_TEMPERATURE（例如 0.7）或縮小 BOT_MAX_IMAGE_WIDTH 再試。")
+            return {
+                "thought": "MODEL_DEGENERATED: repeated-token loop, not a real decision",
+                "action": "IDLE",
+            }
+
         # 🛠️ 用正則表達式解析 THOUGHT 與 ACTION
         thought = ""
         action = ""
