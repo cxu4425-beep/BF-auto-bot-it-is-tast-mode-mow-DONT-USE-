@@ -9,29 +9,36 @@ echo.
 
 set "BOT_DIR=%~dp0"
 
-REM ─── 調校參數（子程序會繼承這些環境變數）────────────────────────
+REM --- Tuning (child processes inherit these) ------------------------
+REM Keep this file pure ASCII. Batch files are read using the console's
+REM OEM codepage, so UTF-8 comments arrive as mojibake, and any byte that
+REM lands on an ampersand is treated as a command separator. REM does not
+REM protect against that, so cmd ends up executing the garbage.
 
-REM 視覺模型。qwen2.5vl:3b 是為 GUI/螢幕代理訓練的，約 3.2GB，
-REM 在 8GB 顯卡上留得下空間給遊戲本身。要換模型改這一行即可
-REM （main.py 與 fastapi_server.py 都讀 BOT_MODEL 這個環境變數）。
+REM Vision model. qwen2.5vl:3b is trained for GUI/screen-agent work and is
+REM about 3.2GB, which leaves room on an 8GB card for the game itself.
+REM Change this one line to switch models - main.py and fastapi_server.py
+REM both read BOT_MODEL.
 set "OLLAMA_MODEL=qwen2.5vl:3b"
 set "BOT_MODEL=%OLLAMA_MODEL%"
 
-REM 每輪之間的額外延遲（毫秒）。注意這是「加」在推論時間上的，不是週期目標：
-REM 一輪的總時間 = 推論 + 這個值。實測 8GB 顯卡上推論約 1.8 秒，
-REM 所以這裡設小一點就好，設 2000 會讓每輪拖到近 4 秒，反應太鈍。
+REM Extra delay between rounds, in ms. This is ADDED to inference time, it
+REM is not a target period: one round = inference + this value. Inference
+REM measured about 1.8s on an 8GB card, so keep this small. 2000 would
+REM stretch each round to nearly 4 seconds, which is too sluggish.
 set "BOT_LOOP_DELAY_MS=200"
 
-REM 送給模型前的截圖寬度上限。這是推論速度最大的槓桿：
-REM 1920x1080 約 2600 個 vision token，800 寬只剩約 460 個。
-REM 嫌慢可以再降到 640。
+REM Screenshot width cap before the frame is sent to the model. This is the
+REM single biggest lever on speed: 1920x1080 is roughly 2600 vision tokens,
+REM 800 wide is about 460. Drop to 640 if it still feels slow.
 set "BOT_MAX_IMAGE_WIDTH=800"
 
-REM Context window。預設的 128000 會讓 KV cache 吃掉約 5GB，
-REM 模型撐到 8.4GB 而塞不進 8GB 顯卡，導致部分層跑在 CPU 上（實測慢 3 倍）。
+REM Context window. The 128000 default makes the KV cache eat around 5GB,
+REM pushing the model to 8.4GB so it no longer fits in 8GB of VRAM and part
+REM of it runs on CPU - measured 3x slower.
 set "BOT_NUM_CTX=4096"
 
-REM 遊戲視窗標題（模糊比對，不分大小寫）。
+REM Game window title (case-insensitive substring match).
 set "BOT_WINDOW_TITLE=Roblox"
 
 echo [1/4] Checking Python...
