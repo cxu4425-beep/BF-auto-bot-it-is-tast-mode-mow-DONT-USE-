@@ -35,9 +35,22 @@ namespace BloxFruitsBot
         // 太大會讓模型崩掉、太小會讓它看不清楚，兩邊都不是線性劣化。
         private static readonly int MaxImageWidth = ReadEnvInt("BOT_MAX_IMAGE_WIDTH", 400);
 
-        // 每輪之間的間隔（毫秒）。要設得比「模型單輪推論時間」長，
-        // 否則請求只會排隊堆積，Bot 看到的畫面永遠是過期的。
+        // 每輪之間的間隔（毫秒）。這是「加」在推論時間上的，不是週期目標：
+        // 一輪總時間 = 推論 + 這個值。
         private static readonly int LoopDelayMs = ReadEnvInt("BOT_LOOP_DELAY_MS", 2000);
+
+        // 一次送給模型的連續影格數（含當前這張）。設 1 就是舊的單張行為。
+        //
+        // 送多張的用意是給模型「時間軸」。單張畫面看不出上一個動作有沒有生效，
+        // 提示詞卻要求它自行判斷成敗 —— 那是辦不到的。
+        // 保留前幾輪的畫面不必額外截圖，而且前一張正好是上個動作執行前的樣子。
+        //
+        // 實測 qwen2.5vl:3b 吃 3 張 400px 影格不會退化，且能正確答出
+        // 「The player is moving forward」。代價是每多一張就多一份讀圖時間。
+        private static readonly int FrameCount = Math.Max(1, ReadEnvInt("BOT_FRAME_COUNT", 2));
+
+        // 由舊到新的影格緩衝
+        private static readonly Queue<string> _frameHistory = new Queue<string>();
 
         private static readonly string ApiUrl =
             Environment.GetEnvironmentVariable("BOT_API_URL") ?? "http://localhost:8000/decide";
@@ -185,6 +198,10 @@ namespace BloxFruitsBot
                 Console.WriteLine("[提示] AI 判讀怪怪的時候，打開這個檔案就知道它實際看到什麼。");
             }
 
+            Console.WriteLine(FrameCount > 1
+                ? $"[OK] 每輪送出最近 {FrameCount} 張連續影格，讓 AI 能看出上個動作有沒有生效（BOT_FRAME_COUNT）"
+                : "[OK] 每輪只送 1 張畫面（設 BOT_FRAME_COUNT=2 以上可讓 AI 看出畫面變化）");
+
             Console.WriteLine("[OK] 目前的動作對應（用 BOT_ACTION_<動作名> 可覆寫）：");
             foreach (var pair in ActionMap)
             {
@@ -203,11 +220,19 @@ namespace BloxFruitsBot
                     string base64Image = ConvertBitmapToBase64(screenshot);
                     screenshot.Dispose(); // 釋放記憶體以免洩漏
 
+                    // 推進影格緩衝：最舊的擠掉，最新的排在最後
+                    _frameHistory.Enqueue(base64Image);
+                    while (_frameHistory.Count > FrameCount)
+                    {
+                        _frameHistory.Dequeue();
+                    }
+
                     // B. 【Http Send】將畫面與上一次狀態打包成 JSON 發送給 FastAPI
-                    Console.WriteLine("[System] 正在傳送圖片與狀態反饋至 AI 大腦...");
+                    var frames = new List<string>(_frameHistory);
+                    Console.WriteLine($"[System] 正在傳送 {frames.Count} 張影格與狀態反饋至 AI 大腦...");
                     var requestPayload = new DecisionRequest
                     {
-                        Image = base64Image,
+                        Images = frames,
                         LastAction = _lastAction,
                         LastResult = _lastResult
                     };
@@ -576,6 +601,11 @@ namespace BloxFruitsBot
 
     public class DecisionRequest
     {
+        // 由舊到新的連續影格。多送幾張讓模型看得出「動作到底有沒有生效」——
+        // 單一畫面判斷不出角色是在前進、卡在牆上還是原地不動。
+        [JsonPropertyName("images")]
+        public List<string> Images { get; set; } = new List<string>();
+
         [JsonPropertyName("image_base64")]
         public string Image { get; set; } = string.Empty;
 

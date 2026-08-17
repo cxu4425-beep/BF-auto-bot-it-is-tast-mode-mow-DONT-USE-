@@ -71,31 +71,71 @@ def _parse_keep_alive(raw: str):
 KEEP_ALIVE = _parse_keep_alive(os.getenv("BOT_KEEP_ALIVE", "-1"))
 
 
+ACTION_LIST = (
+    "MOVE_FORWARD, TURN_LEFT, TURN_RIGHT, JUMP, ATTACK, "
+    "TALK_TO_NPC, SWITCH_CHANNEL, RECONNECT, IDLE"
+)
+
+
 class DecisionRequest(BaseModel):
-    image_base64: str
+    # images 是多影格版本（由舊到新）。image_base64 是單張的舊欄位，
+    # 兩個都留著，C# 端不論新舊版本都能對接。
+    images: list[str] = []
+    image_base64: str = ""
     last_action: str = ""
     last_result: str = ""
 
+    def frames(self) -> list[str]:
+        if self.images:
+            return self.images
+        return [self.image_base64] if self.image_base64 else []
 
-@app.post("/decide")
-def decide(request: DecisionRequest):
-    print(f"\n📥 [系統提示] 收到 C# 圖片，大小約 {len(request.image_base64)} 字元，送往 {MODEL}...")
+
+def build_prompt(frame_count: int, last_result: str) -> str:
+    """組出提示詞。單張和多張的措辭必須不同 —— 只有一張畫面時
+    叫模型「比較各影格」只會讓它憑空捏造變化。"""
 
     # 只寫「內容」，不要自己加聊天模板。
     # Ollama 會依模型的 Modelfile 套上正確的模板；
     # 舊版手動塞了 LLaVA 的 "USER: <image> ... ASSISTANT:"，
     # 換成 qwen2.5vl / gemma3 等模型時會變成雙重包裝，反而干擾模型。
-    # ACTION 必須是 Program.cs 的 switch 認得的固定指令，
+    if frame_count > 1:
+        head = (
+            f"You are given {frame_count} consecutive frames from a game, oldest first, "
+            "about one second apart. The LAST image is the current screen.\n"
+            f"The last key/action sent to the game was: {last_result}.\n"
+            "Compare the frames to judge whether that action actually worked - "
+            "whether the player moved, is stuck against an obstacle, took damage, "
+            "or nothing changed. Base your decision on the current (last) frame.\n"
+        )
+    else:
+        head = (
+            f"Analyze this game screen. The last key/action sent to the game was: {last_result}.\n"
+            "This only tells you which key was pressed, not whether it worked - "
+            "judge success or failure yourself from the image.\n"
+        )
+
+    # ACTION 必須是 Program.cs 的對應表認得的固定指令，
     # 不然 AI 自己造詞（"move_cursor"、"Wait"）永遠對不上，會被當成 IDLE 忽略。
-    prompt = (
-        f"Analyze this game screen. The last key/action sent to the game was: {request.last_result}.\n"
-        "This only tells you which key was pressed, not whether it worked - "
-        "judge success or failure yourself from the image.\n"
-        "Reply using this exact template, nothing else:\n"
-        "THOUGHT: (what you see on screen, one short sentence)\n"
-        "ACTION: (exactly ONE word from this list: "
-        "MOVE_FORWARD, TURN_LEFT, TURN_RIGHT, JUMP, ATTACK, TALK_TO_NPC, SWITCH_CHANNEL, RECONNECT, IDLE)"
+    return (
+        head
+        + "Reply using this exact template, nothing else:\n"
+        "THOUGHT: (what you see, one short sentence)\n"
+        f"ACTION: (exactly ONE word from this list: {ACTION_LIST})"
     )
+
+
+@app.post("/decide")
+def decide(request: DecisionRequest):
+    frames = request.frames()
+    if not frames:
+        print("❌ [錯誤] 請求沒有夾帶任何影像")
+        return {"thought": "No image supplied", "action": "IDLE"}
+
+    total = sum(len(f) for f in frames)
+    print(f"\n📥 [系統提示] 收到 C# {len(frames)} 張影格，共約 {total} 字元，送往 {MODEL}...")
+
+    prompt = build_prompt(len(frames), request.last_result)
 
     try:
         ollama_response = requests.post(
@@ -103,7 +143,7 @@ def decide(request: DecisionRequest):
             json={
                 "model": MODEL,
                 "prompt": prompt,
-                "images": [request.image_base64],
+                "images": frames,
                 # 💥 核心修正：移除 "format": "json"，徹底解放 AI 的嘴巴！
                 # temperature 要放在 options 裡，放最外層 Ollama 會直接忽略掉。
                 "options": {
