@@ -19,14 +19,14 @@ namespace BloxFruitsLauncher
         // 內容最大寬度。視窗再寬也維持這個寬度並置中，不讓元件被拉開到兩側。
         private const int ContentWidth = 1040;
 
-        private readonly Panel _root = new() { Dock = DockStyle.Fill };
+        private readonly BackdropPanel _root = new() { Dock = DockStyle.Fill };
 
         // ── 啟動步驟 ────────────────────────────────────────────────
-        private readonly StepRow _stepPython = new() { Title = "Python 環境" };
-        private readonly StepRow _stepOllama = new() { Title = "Ollama 與視覺模型" };
-        private readonly StepRow _stepRoblox = new() { Title = "Roblox 遊戲視窗" };
-        private readonly StepRow _stepServer = new() { Title = "AI 決策伺服器" };
-        private readonly StepRow _stepBot = new() { Title = "遊戲控制端" };
+        private readonly StepRow _stepPython = new() { Title = "◢ 執行時核心 · PYTHON" };
+        private readonly StepRow _stepOllama = new() { Title = "◢ 神經視覺模組 · OLLAMA" };
+        private readonly StepRow _stepRoblox = new() { Title = "◢ 目標環境鎖定 · ROBLOX" };
+        private readonly StepRow _stepServer = new() { Title = "◢ 推論決策引擎 · FASTAPI" };
+        private readonly StepRow _stepBot = new() { Title = "◢ 戰術執行單元 · C#" };
 
         // ── 設定 ────────────────────────────────────────────────────
         private readonly ComboBox _model = new();
@@ -120,7 +120,7 @@ namespace BloxFruitsLauncher
 
         private Panel BuildHeader()
         {
-            var header = new Panel { Dock = DockStyle.Top, Height = 104, BackColor = Theme.Surface };
+            var header = new Panel { Dock = DockStyle.Top, Height = 112, BackColor = Theme.Surface };
             header.Paint += (_, e) =>
             {
                 Graphics g = e.Graphics;
@@ -129,26 +129,30 @@ namespace BloxFruitsLauncher
 
                 // 標題與副標題各自置中，兩者之間留出較大的行距
                 var titleRect = new Rectangle(0, 22, header.Width, 32);
-                TextRenderer.DrawText(g, "Blox Fruits Bot", Theme.FontTitle, titleRect, Theme.Text,
+                TextRenderer.DrawText(g, "◤ B L O X   F R U I T S   A U T O N O M O U S ◢", Theme.FontTitle, titleRect, Theme.Text,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
 
                 var subRect = new Rectangle(0, 64, header.Width, 20);
-                TextRenderer.DrawText(g, "本機視覺模型自動遊玩  ·  Ollama + FastAPI + C#",
+                TextRenderer.DrawText(g, "本地神經視覺推論核心  ▸  全自主戰術決策管線  ▸  OLLAMA · FASTAPI · C#",
                     Theme.FontSubtitle, subRect, Theme.TextDim,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
 
                 if (header.Width <= 0) return;
-                using var grad = new LinearGradientBrush(
+                // 底線做成 紫 -> 青 -> 紫 的漸層，是整個介面的視覺主軸
+                using (var grad = new LinearGradientBrush(
                     new Rectangle(0, header.Height - 2, header.Width, 2),
-                    Theme.Surface, Theme.Accent, LinearGradientMode.Horizontal);
-                g.FillRectangle(grad, 0, header.Height - 2, header.Width, 2);
+                    Theme.Violet, Theme.Accent, LinearGradientMode.Horizontal))
+                {
+                    grad.SetBlendTriangularShape(0.5f);
+                    g.FillRectangle(grad, 0, header.Height - 2, header.Width, 2);
+                }
             };
             return header;
         }
 
         private Panel BuildSteps()
         {
-            var panel = new Panel { Dock = DockStyle.Top, Height = 196, Padding = new Padding(0, 16, 0, 8) };
+            var panel = new Panel { Dock = DockStyle.Top, Height = 196, Padding = new Padding(0, 16, 0, 8), BackColor = Color.Transparent };
             foreach (var row in new[] { _stepBot, _stepServer, _stepRoblox, _stepOllama, _stepPython })
             {
                 row.Dock = DockStyle.Top;
@@ -174,11 +178,12 @@ namespace BloxFruitsLauncher
                 ForeColor = Theme.TextDim,
                 Font = Theme.UI(8.5f),
                 AutoSize = true,
+                BackColor = Color.Transparent,
             };
 
         private Panel BuildSettings()
         {
-            var panel = new Panel { Dock = DockStyle.Top, Height = 190 };
+            var panel = new Panel { Dock = DockStyle.Top, Height = 190, BackColor = Color.Transparent };
 
             void Style(Control c)
             {
@@ -210,6 +215,7 @@ namespace BloxFruitsLauncher
             var row1 = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
+                BackColor = Color.Transparent,
                 Height = 66,
                 ColumnCount = 4,
                 RowCount = 2,
@@ -221,10 +227,10 @@ namespace BloxFruitsLauncher
             row1.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
             row1.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
 
-            row1.Controls.Add(Caption("視覺模型"), 0, 0);
-            row1.Controls.Add(Caption("截圖寬度"), 1, 0);
-            row1.Controls.Add(Caption("每輪延遲 ms"), 2, 0);
-            row1.Controls.Add(Caption("影格數"), 3, 0);
+            row1.Controls.Add(Caption("神經視覺模型"), 0, 0);
+            row1.Controls.Add(Caption("感知解析度 px"), 1, 0);
+            row1.Controls.Add(Caption("決策週期 ms"), 2, 0);
+            row1.Controls.Add(Caption("時序取樣數"), 3, 0);
             row1.Controls.Add(WrapInput(_model, 300), 0, 1);
             row1.Controls.Add(WrapInput(_imageWidth, 170), 1, 1);
             row1.Controls.Add(WrapInput(_loopDelay, 170), 2, 1);
@@ -234,6 +240,7 @@ namespace BloxFruitsLauncher
             var row2 = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
+                BackColor = Color.Transparent,
                 Height = 76,
                 ColumnCount = 2,
                 RowCount = 2,
@@ -244,17 +251,17 @@ namespace BloxFruitsLauncher
             row2.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
             row2.RowStyles.Add(new RowStyle(SizeType.Absolute, 46f));
 
-            _autoRoblox.Text = "啟動時自動開啟 Roblox";
+            _autoRoblox.Text = "自動喚醒目標環境";
             _autoRoblox.Font = Theme.UI(9.5f);
             _autoRoblox.Checked = true;
             _autoRoblox.Width = 260;
 
-            _dryRun.Text = "觀察模式（不送按鍵、不搶焦點）";
+            _dryRun.Text = "靜默觀測模式（僅推論，不介入）";
             _dryRun.Font = Theme.UI(9.5f);
             _dryRun.Width = 320;
 
             row2.Controls.Add(_autoRoblox, 0, 0);
-            row2.Controls.Add(Caption("Roblox 啟動連結或執行檔路徑"), 1, 0);
+            row2.Controls.Add(Caption("目標環境喚醒向量（連結或執行檔路徑）"), 1, 0);
             row2.Controls.Add(_dryRun, 0, 1);
             row2.Controls.Add(WrapInput(_robloxLink, 420), 1, 1);
 
@@ -262,10 +269,11 @@ namespace BloxFruitsLauncher
             {
                 Dock = DockStyle.Top,
                 Height = 42,
-                Text = "截圖寬度過大會讓小模型輸出崩壞、過小會產生幻覺；qwen2.5vl:3b 實測可用區間約 400。\n"
-                     + "找不到 Roblox 視窗時 AI 會看到你的桌面，決策不會有意義，所以這一步失敗就會停下來。",
+                Text = "▸ 感知解析度過高會使推論核心輸出崩解，過低則引發幻覺；qwen2.5vl:3b 實測穩定區間約 400。\n"
+                     + "▸ 未鎖定目標環境時，視覺模組擷取到的是桌面而非遊戲畫面，決策全數失效，故此步驟失敗即中止。",
                 ForeColor = Theme.TextDim,
                 Font = Theme.UI(8.25f),
+                BackColor = Color.Transparent,
                 TextAlign = ContentAlignment.MiddleCenter,
             };
 
@@ -280,6 +288,7 @@ namespace BloxFruitsLauncher
             var table = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
+                BackColor = Color.Transparent,
                 Height = 66,
                 ColumnCount = 3,
                 RowCount = 1,
@@ -288,21 +297,27 @@ namespace BloxFruitsLauncher
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34f));
 
-            _btnStart.Text = "啟動";
+            _btnStart.Text = "▶  啟 動 系 統";
             _btnStart.BaseColor = Theme.Accent;
             _btnStart.HoverColor = Theme.AccentHi;
-            _btnStart.LabelColor = Color.FromArgb(12, 18, 28);
+            _btnStart.LabelColor = Color.FromArgb(4, 12, 20);
+            _btnStart.GlowColor = Theme.Accent;
+            _btnStart.BorderColor = Theme.Accent;
             _btnStart.Size = new Size(180, 42);
             _btnStart.Anchor = AnchorStyles.None;      // 在儲存格內置中
             _btnStart.Click += async (_, _) => await StartAllAsync();
 
-            _btnStop.Text = "停止";
+            _btnStop.Text = "■  緊 急 停 機";
+            _btnStop.GlowColor = Theme.Fail;
+            _btnStop.BorderColor = Color.FromArgb(90, 40, 60);
             _btnStop.Size = new Size(180, 42);
             _btnStop.Anchor = AnchorStyles.None;
             _btnStop.Enabled = false;
             _btnStop.Click += (_, _) => StopAll(quiet: false);
 
-            _btnFrame.Text = "開啟 AI 看到的畫面";
+            _btnFrame.Text = "◉  檢視感知影像";
+            _btnFrame.GlowColor = Theme.Violet;
+            _btnFrame.BorderColor = Color.FromArgb(70, 45, 110);
             _btnFrame.Size = new Size(210, 42);
             _btnFrame.Anchor = AnchorStyles.None;
             _btnFrame.Click += (_, _) => OpenLastFrame();
@@ -319,6 +334,7 @@ namespace BloxFruitsLauncher
             var table = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
+                BackColor = Color.Transparent,
                 ColumnCount = 3,
                 RowCount = 1,
             };
@@ -326,9 +342,9 @@ namespace BloxFruitsLauncher
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34f));
 
-            table.Controls.Add(LogPane("C#  遊戲控制端", _logBot, Theme.Ok), 0, 0);
-            table.Controls.Add(LogPane("Python  AI 決策", _logPython, Theme.Accent), 1, 0);
-            table.Controls.Add(LogPane("FastAPI  HTTP", _logApi, Theme.Warn), 2, 0);
+            table.Controls.Add(LogPane("◈  戰術執行單元 / C#", _logBot, Theme.Ok), 0, 0);
+            table.Controls.Add(LogPane("◈  推論核心 / PYTHON", _logPython, Theme.Accent), 1, 0);
+            table.Controls.Add(LogPane("◈  通訊匯流排 / FASTAPI", _logApi, Theme.Violet), 2, 0);
             return table;
         }
 
@@ -449,12 +465,12 @@ namespace BloxFruitsLauncher
 
             if (string.IsNullOrEmpty(_botDir))
             {
-                Log("找不到 BloxFruitsBot 資料夾（需要 main.py 與 BloxFruitsBot.csproj）。", Theme.Fail);
+                Log("◈ 掛載失敗 — 找不到 BloxFruitsBot 資料夾（需要 main.py 與 BloxFruitsBot.csproj）。", Theme.Fail);
                 Log("請把這個執行檔放在專案資料夾內，或其子資料夾中。", Theme.TextDim);
                 _btnStart.Enabled = false;
                 return;
             }
-            Log($"專案資料夾: {_botDir}", Theme.TextDim);
+            Log($"▸ 已掛載作戰資料夾: {_botDir}", Theme.TextDim);
         }
 
         // ── 啟動流程 ────────────────────────────────────────────────
@@ -472,7 +488,7 @@ namespace BloxFruitsLauncher
             {
                 SetStep(s, StepState.Pending, "");
             }
-            Log("開始啟動…", Theme.Accent);
+            Log("▸ 初始化序列啟動…", Theme.Accent);
 
             try
             {
@@ -481,25 +497,25 @@ namespace BloxFruitsLauncher
                 if (!await EnsureRobloxAsync(token)) { Abort(); return; }
                 if (!StartAiServer()) { Abort(); return; }
 
-                SetStep(_stepServer, StepState.Running, "等待伺服器就緒…");
+                SetStep(_stepServer, StepState.Running, "等待推論引擎上線…");
                 await Task.Delay(4000, token);
                 SetStep(_stepServer, StepState.Ok, "http://localhost:8000/decide");
 
                 if (!StartBot()) { Abort(); return; }
 
-                Log("全部啟動完成。", Theme.Ok);
+                Log("▸ 全系統上線，所有模組運作中。", Theme.Ok);
                 Log(_dryRun.Checked
-                        ? "觀察模式：不會送出按鍵，也不會搶走視窗焦點。"
-                        : "Bot 會把 Roblox 拉到前景並實際操作，要停請按「停止」。",
+                        ? "▸ 靜默觀測：僅產生決策，不送出按鍵，也不會搶走視窗焦點。"
+                        : "▸ 全自主介入：會把 Roblox 拉到前景並實際操作，要停請按「緊急停機」。",
                     Theme.Warn);
             }
             catch (OperationCanceledException)
             {
-                Log("啟動已取消。", Theme.TextDim);
+                Log("▸ 初始化序列已中止。", Theme.TextDim);
             }
             catch (Exception ex)
             {
-                Log($"啟動失敗: {ex.Message}", Theme.Fail);
+                Log($"◈ 初始化失敗 — {ex.Message}", Theme.Fail);
                 Abort();
             }
 
@@ -513,12 +529,12 @@ namespace BloxFruitsLauncher
 
         private async Task<bool> CheckPythonAsync(CancellationToken token)
         {
-            SetStep(_stepPython, StepState.Running, "偵測中…");
+            SetStep(_stepPython, StepState.Running, "掃描執行時…");
             var (code, output) = await RunCaptureAsync("python", "--version", token);
             if (code != 0)
             {
-                SetStep(_stepPython, StepState.Fail, "找不到 python，請先安裝 Python 3");
-                Log("找不到 python。請安裝 Python 3 並確認它在 PATH 中。", Theme.Fail);
+                SetStep(_stepPython, StepState.Fail, "核心離線 · 找不到 python");
+                Log("◈ 執行時核心離線 — 找不到 python，請安裝 Python 3 並確認它在 PATH 中。", Theme.Fail);
                 return false;
             }
             SetStep(_stepPython, StepState.Ok, output.Trim());
@@ -528,34 +544,34 @@ namespace BloxFruitsLauncher
         private async Task<bool> CheckOllamaAsync(CancellationToken token)
         {
             string model = _model.Text.Trim();
-            SetStep(_stepOllama, StepState.Running, "檢查 Ollama…");
+            SetStep(_stepOllama, StepState.Running, "連結神經模組…");
 
             var (code, list) = await RunCaptureAsync("ollama", "list", token);
             if (code != 0)
             {
-                SetStep(_stepOllama, StepState.Fail, "找不到 ollama，請先安裝");
-                Log("找不到 ollama。請至 https://ollama.com 安裝後再試。", Theme.Fail);
+                SetStep(_stepOllama, StepState.Fail, "模組離線 · 找不到 ollama");
+                Log("◈ 神經模組離線 — 找不到 ollama，請至 https://ollama.com 安裝後再試。", Theme.Fail);
                 return false;
             }
 
             if (list.Contains(model, StringComparison.OrdinalIgnoreCase))
             {
-                SetStep(_stepOllama, StepState.Ok, $"{model} 已就緒");
+                SetStep(_stepOllama, StepState.Ok, $"{model} · 權重已載入");
                 return true;
             }
 
-            SetStep(_stepOllama, StepState.Running, $"下載 {model}（首次可能要好幾分鐘）…");
-            Log($"本機沒有 {model}，開始下載。視覺模型約數 GB，請耐心等候。", Theme.Warn);
+            SetStep(_stepOllama, StepState.Running, $"下載權重 {model}（首次可能要好幾分鐘）…");
+            Log($"▸ 本機無 {model} 權重，開始下載。視覺模型約數 GB，請耐心等候。", Theme.Warn);
 
             var (pullCode, pullMsg) = await RunCaptureAsync("ollama", $"pull {model}", token, timeoutMs: 45 * 60 * 1000);
             if (pullCode != 0)
             {
-                SetStep(_stepOllama, StepState.Fail, $"{model} 下載失敗");
-                Log($"下載 {model} 失敗: {pullMsg}", Theme.Fail);
+                SetStep(_stepOllama, StepState.Fail, $"權重取得失敗 · {model}");
+                Log($"◈ 權重下載失敗 — {model}: {pullMsg}", Theme.Fail);
                 return false;
             }
 
-            SetStep(_stepOllama, StepState.Ok, $"{model} 已就緒");
+            SetStep(_stepOllama, StepState.Ok, $"{model} · 權重已載入");
             return true;
         }
 
@@ -566,26 +582,26 @@ namespace BloxFruitsLauncher
         private async Task<bool> EnsureRobloxAsync(CancellationToken token)
         {
             const string title = "Roblox";
-            SetStep(_stepRoblox, StepState.Running, "尋找遊戲視窗…");
+            SetStep(_stepRoblox, StepState.Running, "掃描目標環境…");
 
             if (NativeWindows.Exists(title))
             {
-                SetStep(_stepRoblox, StepState.Ok, "已在執行");
+                SetStep(_stepRoblox, StepState.Ok, "目標已鎖定");
                 return true;
             }
 
             if (!_autoRoblox.Checked)
             {
-                SetStep(_stepRoblox, StepState.Fail, "找不到 Roblox 視窗");
-                Log("找不到 Roblox 視窗。請先手動開啟遊戲，或勾選「啟動時自動開啟 Roblox」。", Theme.Fail);
+                SetStep(_stepRoblox, StepState.Fail, "鎖定失敗 · 找不到 Roblox 視窗");
+                Log("◈ 目標環境未鎖定 — 找不到 Roblox 視窗。請先手動開啟遊戲，或勾選「自動喚醒目標環境」。", Theme.Fail);
                 return false;
             }
 
             string link = _robloxLink.Text.Trim();
             if (string.IsNullOrEmpty(link)) link = "roblox://";
 
-            SetStep(_stepRoblox, StepState.Running, $"啟動 {link} …");
-            Log($"Roblox 尚未執行，嘗試開啟: {link}", Theme.TextDim);
+            SetStep(_stepRoblox, StepState.Running, $"發送喚醒訊號 {link} …");
+            Log($"▸ 目標環境未就緒，發送喚醒向量: {link}", Theme.TextDim);
 
             try
             {
@@ -593,8 +609,8 @@ namespace BloxFruitsLauncher
             }
             catch (Exception ex)
             {
-                SetStep(_stepRoblox, StepState.Fail, "無法啟動 Roblox");
-                Log($"啟動 Roblox 失敗: {ex.Message}", Theme.Fail);
+                SetStep(_stepRoblox, StepState.Fail, "喚醒失敗");
+                Log($"◈ 喚醒目標環境失敗 — {ex.Message}", Theme.Fail);
                 Log("可以改填遊戲網址（https://www.roblox.com/games/...）或 RobloxPlayerBeta.exe 的完整路徑。", Theme.TextDim);
                 return false;
             }
@@ -605,27 +621,27 @@ namespace BloxFruitsLauncher
                 await Task.Delay(1000, token);
                 if (NativeWindows.Exists(title))
                 {
-                    SetStep(_stepRoblox, StepState.Ok, $"已開啟（等待 {waited + 1} 秒）");
-                    Log("Roblox 視窗已出現。請確認你已經進到遊戲畫面裡，不是登入頁或選單。", Theme.Warn);
+                    SetStep(_stepRoblox, StepState.Ok, $"目標已鎖定（{waited + 1} 秒）");
+                    Log("▸ 目標環境已上線。請確認你已經進到遊戲畫面裡，不是登入頁或選單。", Theme.Warn);
                     return true;
                 }
                 if (waited % 10 == 9)
                 {
-                    SetStep(_stepRoblox, StepState.Running, $"等待遊戲視窗… {waited + 1}s");
+                    SetStep(_stepRoblox, StepState.Running, $"等待目標回應… {waited + 1}s");
                 }
             }
 
-            SetStep(_stepRoblox, StepState.Fail, "等了 120 秒仍未出現");
-            Log("等待 Roblox 視窗逾時。請手動開啟遊戲後再按啟動。", Theme.Fail);
+            SetStep(_stepRoblox, StepState.Fail, "逾時 · 120 秒內未偵測到視窗");
+            Log("◈ 目標環境回應逾時 — 請手動開啟遊戲後再按啟動。", Theme.Fail);
             return false;
         }
 
         private bool StartAiServer()
         {
-            SetStep(_stepServer, StepState.Running, "啟動 FastAPI…");
+            SetStep(_stepServer, StepState.Running, "喚醒推論引擎…");
             if (StartTracked("python", "main.py", Pane.Python) == null)
             {
-                SetStep(_stepServer, StepState.Fail, "無法啟動 main.py");
+                SetStep(_stepServer, StepState.Fail, "引擎啟動失敗 · main.py");
                 return false;
             }
             return true;
@@ -633,13 +649,13 @@ namespace BloxFruitsLauncher
 
         private bool StartBot()
         {
-            SetStep(_stepBot, StepState.Running, "編譯並啟動…");
+            SetStep(_stepBot, StepState.Running, "編譯戰術單元…");
             if (StartTracked("dotnet", "run --project BloxFruitsBot.csproj -c Release", Pane.Bot) == null)
             {
-                SetStep(_stepBot, StepState.Fail, "無法啟動 dotnet run");
+                SetStep(_stepBot, StepState.Fail, "單元啟動失敗 · dotnet run");
                 return false;
             }
-            SetStep(_stepBot, StepState.Ok, _dryRun.Checked ? "觀察模式執行中" : "自動操作執行中");
+            SetStep(_stepBot, StepState.Ok, _dryRun.Checked ? "靜默觀測中" : "全自主運作中");
             return true;
         }
 
@@ -690,7 +706,7 @@ namespace BloxFruitsLauncher
 
                 proc.OutputDataReceived += (_, e) => Route(e.Data, false);
                 proc.ErrorDataReceived += (_, e) => Route(e.Data, true);
-                proc.Exited += (_, _) => Log(pane, "行程結束。", Theme.TextDim);
+                proc.Exited += (_, _) => Log(pane, "▸ 模組已離線。", Theme.TextDim);
 
                 proc.Start();
                 proc.BeginOutputReadLine();
@@ -776,7 +792,7 @@ namespace BloxFruitsLauncher
 
             if (quiet) return;
 
-            Log("已停止所有元件。", Theme.Warn);
+            Log("▸ 全模組已停機。", Theme.Warn);
             SetStep(_stepServer, StepState.Pending, "");
             SetStep(_stepBot, StepState.Pending, "");
             _btnStart.Enabled = true;
@@ -788,7 +804,7 @@ namespace BloxFruitsLauncher
             string path = Path.Combine(_botDir, "last_frame.jpg");
             if (!File.Exists(path))
             {
-                Log("還沒有 last_frame.jpg — 先啟動 Bot 跑一輪。", Theme.Warn);
+                Log("▸ 尚無感知影像 — 先啟動系統跑一輪。", Theme.Warn);
                 return;
             }
             try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }

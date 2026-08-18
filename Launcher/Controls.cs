@@ -19,6 +19,8 @@ namespace BloxFruitsLauncher
         public Color BaseColor { get; set; } = Theme.SurfaceHi;
         public Color HoverColor { get; set; } = Theme.Border;
         public Color LabelColor { get; set; } = Theme.Text;
+        public Color GlowColor { get; set; } = Color.Empty;
+        public Color BorderColor { get; set; } = Theme.Border;
         public int Radius { get; set; } = 18;   // Android 風格的大圓角
 
         public FlatButton()
@@ -75,16 +77,26 @@ namespace BloxFruitsLauncher
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-            var rect = new Rectangle(0, 0, Width - 1, Height - 1);
+            var rect = new Rectangle(4, 4, Width - 9, Height - 9);
             Color fill = Enabled
                 ? Theme.Lerp(BaseColor, HoverColor, _hover)
-                : Color.FromArgb(30, 33, 42);
+                : Color.FromArgb(14, 20, 34);
             Color label = Enabled ? LabelColor : Theme.TextDim;
+
+            // 停留時輝光加強，是這個介面主要的「科幻感」來源
+            if (Enabled && GlowColor != Color.Empty)
+            {
+                Theme.DrawGlow(g, rect, Radius, GlowColor, 4, 0.5f + _hover * 1.4f);
+            }
 
             using (var path = Theme.RoundedRect(rect, Radius))
             using (var brush = new SolidBrush(fill))
             {
                 g.FillPath(brush, path);
+                using var edge = new Pen(Enabled
+                    ? Theme.Lerp(BorderColor, Theme.Lerp(BorderColor, Color.White, 0.35f), _hover)
+                    : Theme.Border, 1.2f);
+                g.DrawPath(edge, path);
             }
 
             TextRenderer.DrawText(g, Text, Font, rect, label,
@@ -338,6 +350,55 @@ namespace BloxFruitsLauncher
         {
             if (disposing) _anim.Dispose();
             base.Dispose(disposing);
+        }
+    }
+
+
+
+    /// <summary>
+    /// 深空背景：垂直漸層 + 淡網格 + 頂部光暈。
+    /// 畫在最底層的容器上，其餘面板設成透明就會透出來。
+    /// </summary>
+    internal sealed class BackdropPanel : Panel
+    {
+        public BackdropPanel()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint
+                   | ControlStyles.OptimizedDoubleBuffer
+                   | ControlStyles.ResizeRedraw
+                   | ControlStyles.UserPaint, true);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            if (Width <= 0 || Height <= 0) return;
+
+            var full = new Rectangle(0, 0, Width, Height);
+
+            using (var grad = new LinearGradientBrush(full, Theme.Background, Theme.BackgroundDeep, 90f))
+            {
+                g.FillRectangle(grad, full);
+            }
+
+            // 淡網格。間距夠大才不會變成雜訊
+            using (var pen = new Pen(Theme.Grid, 1f))
+            {
+                for (int x = 0; x < Width; x += 46) g.DrawLine(pen, x, 0, x, Height);
+                for (int y = 0; y < Height; y += 46) g.DrawLine(pen, 0, y, Width, y);
+            }
+
+            // 頂部中央的青色光暈，讓視線往標題集中
+            int glowW = Math.Max(Width, 400);
+            var glowRect = new Rectangle(Width / 2 - glowW / 2, -glowW / 3, glowW, glowW / 2);
+            using var path = new GraphicsPath();
+            path.AddEllipse(glowRect);
+            using var brush = new PathGradientBrush(path)
+            {
+                CenterColor = Color.FromArgb(46, Theme.Accent),
+                SurroundColors = new[] { Color.FromArgb(0, Theme.Accent) },
+            };
+            g.FillEllipse(brush, glowRect);
         }
     }
 
