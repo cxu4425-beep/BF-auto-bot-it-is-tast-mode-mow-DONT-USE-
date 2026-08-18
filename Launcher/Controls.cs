@@ -2,6 +2,10 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+// WinForms 專案的 ImplicitUsings 會自動引入 System.Threading，
+// 它和 System.Windows.Forms 都有 Timer，不指定就是 CS0104 模稜兩可。
+// 用別名一次講清楚，底下就能照常寫 Timer。
+using Timer = System.Windows.Forms.Timer;
 
 namespace BloxFruitsLauncher
 {

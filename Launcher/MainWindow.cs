@@ -8,6 +8,10 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+// WinForms 專案的 ImplicitUsings 會自動引入 System.Threading，
+// 它和 System.Windows.Forms 都有 Timer，不指定就是 CS0104 模稜兩可。
+// 用別名一次講清楚，底下就能照常寫 Timer。
+using Timer = System.Windows.Forms.Timer;
 
 namespace BloxFruitsLauncher
 {
@@ -31,8 +35,8 @@ namespace BloxFruitsLauncher
         private readonly FlatButton _btnFrame = new();
         private readonly RichTextBox _log = new();
 
-        private readonly System.Windows.Forms.Timer _pulseTimer = new() { Interval = 33 };
-        private readonly System.Windows.Forms.Timer _fadeTimer = new() { Interval = 15 };
+        private readonly Timer _pulseTimer = new() { Interval = 33 };
+        private readonly Timer _fadeTimer = new() { Interval = 15 };
         private float _phase;
 
         private readonly List<Process> _children = new();
