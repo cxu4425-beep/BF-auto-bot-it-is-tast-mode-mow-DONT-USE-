@@ -49,6 +49,20 @@ namespace BloxFruitsBot
         // 「The player is moving forward」。代價是每多一張就多一份讀圖時間。
         private static readonly int FrameCount = Math.Max(1, ReadEnvInt("BOT_FRAME_COUNT", 2));
 
+        // 觀察模式：照常截圖、問 AI、印出決策，但「不送任何按鍵滑鼠」。
+        // 因為不需要送輸入，也就不必把遊戲搶到前景，你可以一邊看 log 一邊自己玩，
+        // 讓 AI 在旁邊講它會怎麼做 —— 這是評估決策品質最省事的方式。
+        private static readonly bool DryRun = ReadEnvBool("BOT_DRY_RUN", false);
+
+        // 是否在截圖與送按鍵前把遊戲視窗拉到前景。
+        //
+        // 截圖和送輸入對焦點的需求其實不同：
+        //   截圖用 CopyFromScreen，只要視窗「沒被蓋住」就抓得到，不必是前景。
+        //   送輸入用 SendInput，走硬體輸入佇列，只會進到前景視窗，非前景不可。
+        // 所以關掉這個開關時，只要你把 Roblox 開成視窗模式且不被遮住，
+        // 截圖照樣正確，代價是按鍵可能送不進遊戲（除非它剛好是前景）。
+        private static readonly bool FocusWindow = ReadEnvBool("BOT_FOCUS_WINDOW", true);
+
         // 由舊到新的影格緩衝
         private static readonly Queue<string> _frameHistory = new Queue<string>();
 
@@ -67,6 +81,18 @@ namespace BloxFruitsBot
         {
             string? raw = Environment.GetEnvironmentVariable(name);
             return int.TryParse(raw, out int value) ? value : fallback;
+        }
+
+        private static bool ReadEnvBool(string name, bool fallback)
+        {
+            string? raw = Environment.GetEnvironmentVariable(name)?.Trim();
+            if (string.IsNullOrEmpty(raw))
+            {
+                return fallback;
+            }
+            return raw == "1"
+                || raw.Equals("true", StringComparison.OrdinalIgnoreCase)
+                || raw.Equals("yes", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -143,10 +169,11 @@ namespace BloxFruitsBot
         ///  - SendInput 走的是硬體輸入佇列，只會送到前景視窗。
         ///
         /// 已經在前景時直接返回，不浪費那 120ms。
+        /// BOT_FOCUS_WINDOW=0 可完全關掉搶焦點的行為（見該欄位的說明）。
         /// </summary>
         private static void EnsureTargetForeground()
         {
-            if (_targetWindowHwnd == IntPtr.Zero)
+            if (_targetWindowHwnd == IntPtr.Zero || !FocusWindow)
             {
                 return;
             }
@@ -201,6 +228,18 @@ namespace BloxFruitsBot
             Console.WriteLine(FrameCount > 1
                 ? $"[OK] 每輪送出最近 {FrameCount} 張連續影格，讓 AI 能看出上個動作有沒有生效（BOT_FRAME_COUNT）"
                 : "[OK] 每輪只送 1 張畫面（設 BOT_FRAME_COUNT=2 以上可讓 AI 看出畫面變化）");
+
+            if (DryRun)
+            {
+                Console.WriteLine("[OK] 觀察模式 (BOT_DRY_RUN=1)：只印出決策，不送出任何按鍵滑鼠，也不搶視窗焦點。");
+                Console.WriteLine("[提示] 你可以自己玩，讓 AI 在旁邊講它會怎麼做，藉此評估決策品質。");
+            }
+            else if (!FocusWindow)
+            {
+                Console.WriteLine("[OK] 已關閉搶焦點 (BOT_FOCUS_WINDOW=0)。");
+                Console.WriteLine("[警告] 遊戲不是前景時 SendInput 送不進去，按鍵多半無效。");
+                Console.WriteLine("[警告] 且遊戲視窗一旦被遮住，截到的就是蓋在上面的視窗。");
+            }
 
             Console.WriteLine("[OK] 目前的動作對應（用 BOT_ACTION_<動作名> 可覆寫）：");
             foreach (var pair in ActionMap)
@@ -431,7 +470,7 @@ namespace BloxFruitsBot
         /// </summary>
         private static string ExecuteGameAction(string action)
         {
-            if (_targetWindowHwnd == IntPtr.Zero)
+            if (_targetWindowHwnd == IntPtr.Zero && !DryRun)
             {
                 return "FAILED_NO_TARGET_WINDOW";
             }
@@ -444,6 +483,14 @@ namespace BloxFruitsBot
                 {
                     Console.WriteLine($"[Action] 未知動作 '{actionUpper}'，當成 IDLE 忽略");
                     return "IDLE";
+                }
+
+                if (DryRun)
+                {
+                    // 觀察模式：只印出「會做什麼」，不真的送出。
+                    // 回傳值仍照實回報，AI 下一輪才有正確的上下文可判斷。
+                    Console.WriteLine($"[DryRun] 不送出，原本會執行: {actionUpper} -> {input}");
+                    return actionUpper;
                 }
 
                 if (input.Equals("NONE", StringComparison.OrdinalIgnoreCase))
