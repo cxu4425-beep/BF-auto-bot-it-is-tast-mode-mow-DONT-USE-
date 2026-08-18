@@ -19,6 +19,9 @@ namespace BloxFruitsLauncher
         // 內容最大寬度。視窗再寬也維持這個寬度並置中，不讓元件被拉開到兩側。
         private const int ContentWidth = 1040;
 
+        // 標題與副標之間的行距
+        private const int TitleGap = 14;
+
         private readonly BackdropPanel _root = new() { Dock = DockStyle.Fill };
         private Panel? _header;
 
@@ -138,38 +141,66 @@ namespace BloxFruitsLauncher
             Controls.Add(header);
         }
 
+        private const string TitleText = "◤ B L O X   F R U I T S   A U T O N O M O U S ◢";
+        private const string SubtitleText = "本地神經視覺推論核心  ▸  全自主戰術決策管線  ▸  OLLAMA · FASTAPI · C#";
+
         private Panel BuildHeader()
         {
-            var header = new Panel { Dock = DockStyle.Top, Height = 112, BackColor = Theme.Surface };
+            // 高度由實際量到的文字尺寸決定。
+            // 先前寫死 y=22 / y=64 這種像素座標，在顯示縮放不是 100% 時會出事：
+            // 字型用 pt 指定會隨 DPI 放大，寫死的矩形卻不會，標題長高後就撞到副標。
+            Size t = TextRenderer.MeasureText(TitleText, Theme.FontTitle);
+            Size sub = TextRenderer.MeasureText(SubtitleText, Theme.FontSubtitle);
+            int needed = 24 + t.Height + TitleGap + sub.Height + 22;
+
+            var header = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = Math.Max(104, needed),
+                BackColor = Theme.Surface,
+            };
             _header = header;
             // Panel 預設不在尺寸改變時重繪，視窗變寬後標題會停在舊寬度的中心，
             // 底線也只畫到舊寬度為止。必須自己觸發整塊重畫。
             header.Resize += (_, _) => header.Invalidate();
+
             header.Paint += (_, e) =>
             {
                 Graphics g = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-                // 標題與副標題各自置中，兩者之間留出較大的行距
-                var titleRect = new Rectangle(0, 22, header.Width, 32);
-                TextRenderer.DrawText(g, "◤ B L O X   F R U I T S   A U T O N O M O U S ◢", Theme.FontTitle, titleRect, Theme.Text,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                int w = header.Width;
+                if (w <= 0) return;
 
-                var subRect = new Rectangle(0, 64, header.Width, 20);
-                TextRenderer.DrawText(g, "本地神經視覺推論核心  ▸  全自主戰術決策管線  ▸  OLLAMA · FASTAPI · C#",
-                    Theme.FontSubtitle, subRect, Theme.TextDim,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-
-                if (header.Width <= 0) return;
-                // 底線做成 紫 -> 青 -> 紫 的漸層，是整個介面的視覺主軸
-                using (var grad = new LinearGradientBrush(
-                    new Rectangle(0, header.Height - 2, header.Width, 2),
-                    Theme.Violet, Theme.Accent, LinearGradientMode.Horizontal))
+                // 視窗太窄時標題會超出去，降一級字級而不是讓它被切掉
+                Font titleFont = Theme.FontTitle;
+                Size titleSize = TextRenderer.MeasureText(g, TitleText, titleFont);
+                if (titleSize.Width > w - 32)
                 {
-                    grad.SetBlendTriangularShape(0.5f);
-                    g.FillRectangle(grad, 0, header.Height - 2, header.Width, 2);
+                    titleFont = Theme.FontTitleSmall;
+                    titleSize = TextRenderer.MeasureText(g, TitleText, titleFont);
                 }
+                Size subSize = TextRenderer.MeasureText(g, SubtitleText, Theme.FontSubtitle);
+
+                // 兩行當成一個整體，在標題列（扣掉底線）裡垂直置中
+                int blockH = titleSize.Height + TitleGap + subSize.Height;
+                int top = Math.Max(6, (header.Height - 2 - blockH) / 2);
+
+                TextRenderer.DrawText(g, TitleText, titleFont,
+                    new Rectangle(0, top, w, titleSize.Height), Theme.Text,
+                    TextFormatFlags.HorizontalCenter);
+
+                TextRenderer.DrawText(g, SubtitleText, Theme.FontSubtitle,
+                    new Rectangle(0, top + titleSize.Height + TitleGap, w, subSize.Height),
+                    Theme.TextDim, TextFormatFlags.HorizontalCenter);
+
+                // 底線做成 紫 -> 青 -> 紫 的漸層，是整個介面的視覺主軸
+                using var grad = new LinearGradientBrush(
+                    new Rectangle(0, header.Height - 2, w, 2),
+                    Theme.Violet, Theme.Accent, LinearGradientMode.Horizontal);
+                grad.SetBlendTriangularShape(0.5f);
+                g.FillRectangle(grad, 0, header.Height - 2, w, 2);
             };
             return header;
         }

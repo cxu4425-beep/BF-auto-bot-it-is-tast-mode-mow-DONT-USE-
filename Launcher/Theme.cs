@@ -34,6 +34,7 @@ namespace BloxFruitsLauncher
         // OnPaint 每秒會被呼叫幾十次，在裡面 new Font 等於持續洩漏 GDI 控制代碼。
         // 需要在繪圖中使用的字型一律走這些快取實例。
         public static readonly Font FontTitle = UI(19f, FontStyle.Bold);
+        public static readonly Font FontTitleSmall = UI(13f, FontStyle.Bold);
         public static readonly Font FontSubtitle = UI(9f);
         public static readonly Font FontStep = UI(9.75f, FontStyle.Bold);
         public static readonly Font FontDetail = UI(9f);
