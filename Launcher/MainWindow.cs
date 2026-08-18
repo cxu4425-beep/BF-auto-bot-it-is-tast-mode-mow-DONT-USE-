@@ -10,16 +10,21 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 // WinForms 專案的 ImplicitUsings 會自動引入 System.Threading，
 // 它和 System.Windows.Forms 都有 Timer，不指定就是 CS0104 模稜兩可。
-// 用別名一次講清楚，底下就能照常寫 Timer。
 using Timer = System.Windows.Forms.Timer;
 
 namespace BloxFruitsLauncher
 {
     internal sealed class MainWindow : Form
     {
+        // 內容最大寬度。視窗再寬也維持這個寬度並置中，不讓元件被拉開到兩側。
+        private const int ContentWidth = 1040;
+
+        private readonly Panel _root = new() { Dock = DockStyle.Fill };
+
         // ── 啟動步驟 ────────────────────────────────────────────────
         private readonly StepRow _stepPython = new() { Title = "Python 環境" };
         private readonly StepRow _stepOllama = new() { Title = "Ollama 與視覺模型" };
+        private readonly StepRow _stepRoblox = new() { Title = "Roblox 遊戲視窗" };
         private readonly StepRow _stepServer = new() { Title = "AI 決策伺服器" };
         private readonly StepRow _stepBot = new() { Title = "遊戲控制端" };
 
@@ -28,12 +33,18 @@ namespace BloxFruitsLauncher
         private readonly NumericUpDown _imageWidth = new();
         private readonly NumericUpDown _loopDelay = new();
         private readonly NumericUpDown _frameCount = new();
-        private readonly CheckBox _dryRun = new();
+        private readonly RoundedCheckBox _dryRun = new();
+        private readonly RoundedCheckBox _autoRoblox = new();
+        private readonly TextBox _robloxLink = new();
 
         private readonly FlatButton _btnStart = new();
         private readonly FlatButton _btnStop = new();
         private readonly FlatButton _btnFrame = new();
-        private readonly RichTextBox _log = new();
+
+        // ── 三個輸出區塊 ────────────────────────────────────────────
+        private readonly RichTextBox _logBot = new();
+        private readonly RichTextBox _logPython = new();
+        private readonly RichTextBox _logApi = new();
 
         private readonly Timer _pulseTimer = new() { Interval = 33 };
         private readonly Timer _fadeTimer = new() { Interval = 15 };
@@ -46,22 +57,25 @@ namespace BloxFruitsLauncher
         public MainWindow()
         {
             Text = "Blox Fruits Bot Launcher";
-            ClientSize = new Size(920, 700);
-            MinimumSize = new Size(820, 600);
+            ClientSize = new Size(1180, 900);
+            MinimumSize = new Size(1020, 800);
             BackColor = Theme.Background;
             ForeColor = Theme.Text;
             Font = Theme.UI(9.75f);
             StartPosition = FormStartPosition.CenterScreen;
             DoubleBuffered = true;
-            Opacity = 0d;                       // 淡入用，載入後補回 1
+            Opacity = 0d;
 
             BuildLayout();
+            CenterContent();
+            Resize += (_, _) => CenterContent();
 
             _pulseTimer.Tick += (_, _) =>
             {
                 _phase = (_phase + 0.045f) % 1f;
                 _stepPython.Tick(_phase);
                 _stepOllama.Tick(_phase);
+                _stepRoblox.Tick(_phase);
                 _stepServer.Tick(_phase);
                 _stepBot.Tick(_phase);
             };
@@ -69,234 +83,367 @@ namespace BloxFruitsLauncher
 
             _fadeTimer.Tick += (_, _) =>
             {
-                if (Opacity >= 0.99d)
-                {
-                    Opacity = 1d;
-                    _fadeTimer.Stop();
-                    return;
-                }
+                if (Opacity >= 0.99d) { Opacity = 1d; _fadeTimer.Stop(); return; }
                 Opacity = Math.Min(1d, Opacity + 0.09d);
             };
 
-            Load += (_, _) =>
-            {
-                _fadeTimer.Start();
-                LocateBotDirectory();
-            };
+            Load += (_, _) => { _fadeTimer.Start(); LocateBotDirectory(); };
             FormClosing += (_, _) => StopAll(quiet: true);
+        }
+
+        /// <summary>把內容維持在 ContentWidth 並置中，靠左右內距達成。</summary>
+        private void CenterContent()
+        {
+            int pad = Math.Max(24, (ClientSize.Width - ContentWidth) / 2);
+            _root.Padding = new Padding(pad, 0, pad, 20);
         }
 
         // ── 版面 ────────────────────────────────────────────────────
 
         private void BuildLayout()
         {
-            var header = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 78,
-                BackColor = Theme.Surface,
-            };
+            var header = BuildHeader();
+            var steps = BuildSteps();
+            var settings = BuildSettings();
+            var actions = BuildActions();
+            var logs = BuildLogs();
+
+            // Dock.Top 的堆疊順序是「後加的在上」，所以要反著加
+            _root.Controls.Add(logs);
+            _root.Controls.Add(actions);
+            _root.Controls.Add(settings);
+            _root.Controls.Add(steps);
+
+            Controls.Add(_root);
+            Controls.Add(header);
+        }
+
+        private Panel BuildHeader()
+        {
+            var header = new Panel { Dock = DockStyle.Top, Height = 104, BackColor = Theme.Surface };
             header.Paint += (_, e) =>
             {
                 Graphics g = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-                TextRenderer.DrawText(g, "Blox Fruits Bot", Theme.FontTitle,
-                    new Point(22, 14), Theme.Text);
-                TextRenderer.DrawText(g, "本機視覺模型自動遊玩 · Ollama + FastAPI + C#",
-                    Theme.FontSubtitle, new Point(24, 44), Theme.TextDim);
+                // 標題與副標題各自置中，兩者之間留出較大的行距
+                var titleRect = new Rectangle(0, 22, header.Width, 32);
+                TextRenderer.DrawText(g, "Blox Fruits Bot", Theme.FontTitle, titleRect, Theme.Text,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
 
-                // 底部一條漸層強調線，唯一的裝飾
+                var subRect = new Rectangle(0, 64, header.Width, 20);
+                TextRenderer.DrawText(g, "本機視覺模型自動遊玩  ·  Ollama + FastAPI + C#",
+                    Theme.FontSubtitle, subRect, Theme.TextDim,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+
                 if (header.Width <= 0) return;
                 using var grad = new LinearGradientBrush(
                     new Rectangle(0, header.Height - 2, header.Width, 2),
-                    Theme.Accent, Theme.Surface, LinearGradientMode.Horizontal);
+                    Theme.Surface, Theme.Accent, LinearGradientMode.Horizontal);
                 g.FillRectangle(grad, 0, header.Height - 2, header.Width, 2);
             };
-
-            var steps = new Panel { Dock = DockStyle.Top, Height = 158, Padding = new Padding(20, 12, 20, 8) };
-            _stepBot.Dock = DockStyle.Top;
-            _stepServer.Dock = DockStyle.Top;
-            _stepOllama.Dock = DockStyle.Top;
-            _stepPython.Dock = DockStyle.Top;
-            steps.Controls.AddRange(new Control[] { _stepBot, _stepServer, _stepOllama, _stepPython });
-
-            var settings = BuildSettingsPanel();
-            var actions = BuildActionPanel();
-
-            _log.Dock = DockStyle.Fill;
-            _log.BackColor = Color.FromArgb(14, 16, 21);
-            _log.ForeColor = Theme.TextDim;
-            _log.Font = Theme.Mono(9f);
-            _log.BorderStyle = BorderStyle.None;
-            _log.ReadOnly = true;
-            _log.WordWrap = false;
-            _log.ScrollBars = RichTextBoxScrollBars.Both;
-
-            var logHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(20, 6, 20, 18) };
-            logHost.Controls.Add(_log);
-
-            Controls.Add(logHost);
-            Controls.Add(actions);
-            Controls.Add(settings);
-            Controls.Add(steps);
-            Controls.Add(header);
+            return header;
         }
 
-        private Panel BuildSettingsPanel()
+        private Panel BuildSteps()
         {
-            var panel = new Panel { Dock = DockStyle.Top, Height = 112, Padding = new Padding(20, 0, 20, 0) };
-
-            Label Caption(string text, int x)
+            var panel = new Panel { Dock = DockStyle.Top, Height = 196, Padding = new Padding(0, 16, 0, 8) };
+            foreach (var row in new[] { _stepBot, _stepServer, _stepRoblox, _stepOllama, _stepPython })
             {
-                var l = new Label
-                {
-                    Text = text,
-                    ForeColor = Theme.TextDim,
-                    Font = Theme.UI(8.5f),
-                    AutoSize = true,
-                    Location = new Point(x, 6),
-                };
-                panel.Controls.Add(l);
-                return l;
+                row.Dock = DockStyle.Top;
+                panel.Controls.Add(row);
             }
+            return panel;
+        }
 
-            void StyleBox(Control c, int x, int width)
+        /// <summary>把控制項包進圓角面板，做出 Android 填色輸入框的樣子。</summary>
+        private static RoundedPanel WrapInput(Control inner, int width, int height = 36)
+        {
+            var host = new RoundedPanel { Width = width, Height = height };
+            inner.Width = width - 22;
+            inner.Location = new Point(11, Math.Max(0, (height - inner.Height) / 2));
+            host.Controls.Add(inner);
+            return host;
+        }
+
+        private Label Caption(string text)
+            => new()
             {
-                c.Location = new Point(x, 26);
-                c.Width = width;
+                Text = text,
+                ForeColor = Theme.TextDim,
+                Font = Theme.UI(8.5f),
+                AutoSize = true,
+            };
+
+        private Panel BuildSettings()
+        {
+            var panel = new Panel { Dock = DockStyle.Top, Height = 190 };
+
+            void Style(Control c)
+            {
                 c.BackColor = Theme.SurfaceHi;
                 c.ForeColor = Theme.Text;
                 c.Font = Theme.UI(9.5f);
-                panel.Controls.Add(c);
             }
 
-            Caption("視覺模型", 2);
             _model.DropDownStyle = ComboBoxStyle.DropDown;
             _model.FlatStyle = FlatStyle.Flat;
             _model.Items.AddRange(new object[] { "qwen2.5vl:3b", "gemma3:4b", "minicpm-v", "qwen2.5vl:7b" });
             _model.Text = "qwen2.5vl:3b";
-            StyleBox(_model, 2, 190);
+            Style(_model);
 
-            Caption("截圖寬度", 210);
             _imageWidth.Minimum = 160; _imageWidth.Maximum = 1920; _imageWidth.Increment = 20;
-            _imageWidth.Value = 400;
-            _imageWidth.BorderStyle = BorderStyle.None;
-            StyleBox(_imageWidth, 210, 92);
+            _imageWidth.Value = 400; _imageWidth.BorderStyle = BorderStyle.None; Style(_imageWidth);
 
-            Caption("每輪延遲 ms", 316);
             _loopDelay.Minimum = 0; _loopDelay.Maximum = 10000; _loopDelay.Increment = 100;
-            _loopDelay.Value = 200;
-            _loopDelay.BorderStyle = BorderStyle.None;
-            StyleBox(_loopDelay, 316, 100);
+            _loopDelay.Value = 200; _loopDelay.BorderStyle = BorderStyle.None; Style(_loopDelay);
 
-            Caption("影格數", 430);
             _frameCount.Minimum = 1; _frameCount.Maximum = 5; _frameCount.Value = 2;
-            _frameCount.BorderStyle = BorderStyle.None;
-            StyleBox(_frameCount, 430, 68);
+            _frameCount.BorderStyle = BorderStyle.None; Style(_frameCount);
 
-            // 這兩個放第二列。之前擠在第一列右側，視窗縮到最小寬度時會被裁掉。
-            _dryRun.Text = "觀察模式（只顯示決策，不送按鍵、不搶視窗焦點）";
-            _dryRun.ForeColor = Theme.Text;
+            _robloxLink.Text = "roblox://";
+            _robloxLink.BorderStyle = BorderStyle.None;
+            Style(_robloxLink);
+
+            // 第一列：四個設定，用表格平均分配才會跟著視窗置中
+            var row1 = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 66,
+                ColumnCount = 4,
+                RowCount = 2,
+            };
+            row1.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34f));
+            row1.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22f));
+            row1.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22f));
+            row1.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22f));
+            row1.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
+            row1.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
+
+            row1.Controls.Add(Caption("視覺模型"), 0, 0);
+            row1.Controls.Add(Caption("截圖寬度"), 1, 0);
+            row1.Controls.Add(Caption("每輪延遲 ms"), 2, 0);
+            row1.Controls.Add(Caption("影格數"), 3, 0);
+            row1.Controls.Add(WrapInput(_model, 300), 0, 1);
+            row1.Controls.Add(WrapInput(_imageWidth, 170), 1, 1);
+            row1.Controls.Add(WrapInput(_loopDelay, 170), 2, 1);
+            row1.Controls.Add(WrapInput(_frameCount, 170), 3, 1);
+
+            // 第二列：Roblox 自動啟動
+            var row2 = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 76,
+                ColumnCount = 2,
+                RowCount = 2,
+            };
+            row2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45f));
+            row2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55f));
+            // 第一列要容得下 26px 高的 RoundedCheckBox，不能只給 22
+            row2.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
+            row2.RowStyles.Add(new RowStyle(SizeType.Absolute, 46f));
+
+            _autoRoblox.Text = "啟動時自動開啟 Roblox";
+            _autoRoblox.Font = Theme.UI(9.5f);
+            _autoRoblox.Checked = true;
+            _autoRoblox.Width = 260;
+
+            _dryRun.Text = "觀察模式（不送按鍵、不搶焦點）";
             _dryRun.Font = Theme.UI(9.5f);
-            _dryRun.AutoSize = true;
-            _dryRun.Location = new Point(2, 62);
-            panel.Controls.Add(_dryRun);
+            _dryRun.Width = 320;
+
+            row2.Controls.Add(_autoRoblox, 0, 0);
+            row2.Controls.Add(Caption("Roblox 啟動連結或執行檔路徑"), 1, 0);
+            row2.Controls.Add(_dryRun, 0, 1);
+            row2.Controls.Add(WrapInput(_robloxLink, 420), 1, 1);
 
             var hint = new Label
             {
-                Text = "截圖寬度過大會讓小模型輸出崩壞，過小會產生幻覺；qwen2.5vl:3b 實測可用區間約 400。",
+                Dock = DockStyle.Top,
+                Height = 42,
+                Text = "截圖寬度過大會讓小模型輸出崩壞、過小會產生幻覺；qwen2.5vl:3b 實測可用區間約 400。\n"
+                     + "找不到 Roblox 視窗時 AI 會看到你的桌面，決策不會有意義，所以這一步失敗就會停下來。",
                 ForeColor = Theme.TextDim,
                 Font = Theme.UI(8.25f),
-                AutoSize = true,
-                Location = new Point(2, 84),
+                TextAlign = ContentAlignment.MiddleCenter,
             };
-            panel.Controls.Add(hint);
 
+            panel.Controls.Add(hint);
+            panel.Controls.Add(row2);
+            panel.Controls.Add(row1);
             return panel;
         }
 
-        private Panel BuildActionPanel()
+        private Panel BuildActions()
         {
-            var panel = new Panel { Dock = DockStyle.Top, Height = 62, Padding = new Padding(20, 0, 20, 0) };
+            var table = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 66,
+                ColumnCount = 3,
+                RowCount = 1,
+            };
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34f));
 
             _btnStart.Text = "啟動";
             _btnStart.BaseColor = Theme.Accent;
             _btnStart.HoverColor = Theme.AccentHi;
             _btnStart.LabelColor = Color.FromArgb(12, 18, 28);
-            _btnStart.Size = new Size(132, 38);
-            _btnStart.Location = new Point(2, 8);
+            _btnStart.Size = new Size(180, 42);
+            _btnStart.Anchor = AnchorStyles.None;      // 在儲存格內置中
             _btnStart.Click += async (_, _) => await StartAllAsync();
 
             _btnStop.Text = "停止";
-            _btnStop.Size = new Size(110, 38);
-            _btnStop.Location = new Point(144, 8);
+            _btnStop.Size = new Size(180, 42);
+            _btnStop.Anchor = AnchorStyles.None;
             _btnStop.Enabled = false;
             _btnStop.Click += (_, _) => StopAll(quiet: false);
 
             _btnFrame.Text = "開啟 AI 看到的畫面";
-            _btnFrame.Size = new Size(190, 38);
-            _btnFrame.Location = new Point(264, 8);
+            _btnFrame.Size = new Size(210, 42);
+            _btnFrame.Anchor = AnchorStyles.None;
             _btnFrame.Click += (_, _) => OpenLastFrame();
 
-            panel.Controls.AddRange(new Control[] { _btnStart, _btnStop, _btnFrame });
-            return panel;
+            table.Controls.Add(_btnStart, 0, 0);
+            table.Controls.Add(_btnStop, 1, 0);
+            table.Controls.Add(_btnFrame, 2, 0);
+            return table;
+        }
+
+        /// <summary>三個並排的輸出區塊。每個是「圓角外框 + 標題 + 內容」。</summary>
+        private Control BuildLogs()
+        {
+            var table = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 1,
+            };
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34f));
+
+            table.Controls.Add(LogPane("C#  遊戲控制端", _logBot, Theme.Ok), 0, 0);
+            table.Controls.Add(LogPane("Python  AI 決策", _logPython, Theme.Accent), 1, 0);
+            table.Controls.Add(LogPane("FastAPI  HTTP", _logApi, Theme.Warn), 2, 0);
+            return table;
+        }
+
+        private Control LogPane(string title, RichTextBox box, Color tint)
+        {
+            var outer = new Panel { Dock = DockStyle.Fill, Padding = new Padding(5, 4, 5, 0), BackColor = Color.Transparent };
+
+            var card = new RoundedPanel
+            {
+                Dock = DockStyle.Fill,
+                Radius = 14,
+                Fill = Color.FromArgb(14, 16, 21),
+                Stroke = Theme.Border,
+                Padding = new Padding(12, 34, 10, 12),
+            };
+
+            var heading = new Label
+            {
+                Text = title,
+                ForeColor = tint,
+                Font = Theme.UI(8.75f, FontStyle.Bold),
+                AutoSize = true,
+                BackColor = Color.Transparent,
+                Location = new Point(14, 11),
+            };
+
+            box.Dock = DockStyle.Fill;
+            box.BackColor = Color.FromArgb(14, 16, 21);
+            box.ForeColor = Theme.TextDim;
+            box.Font = Theme.Mono(8.25f);
+            box.BorderStyle = BorderStyle.None;
+            box.ReadOnly = true;
+            box.WordWrap = false;
+            box.ScrollBars = RichTextBoxScrollBars.Both;
+
+            card.Controls.Add(box);
+            card.Controls.Add(heading);
+            heading.BringToFront();
+            outer.Controls.Add(card);
+            return outer;
         }
 
         // ── 記錄 ────────────────────────────────────────────────────
 
-        private void Log(string line, Color? color = null)
+        private enum Pane { Bot, Python, Api }
+
+        private void Log(Pane pane, string line, Color? color = null)
         {
-            if (_log.IsDisposed) return;
-            if (_log.InvokeRequired)
+            RichTextBox box = pane switch
             {
-                _log.BeginInvoke(new Action(() => Log(line, color)));
+                Pane.Bot => _logBot,
+                Pane.Api => _logApi,
+                _ => _logPython,
+            };
+            if (box.IsDisposed) return;
+            if (box.InvokeRequired)
+            {
+                box.BeginInvoke(new Action(() => Log(pane, line, color)));
                 return;
             }
 
-            _log.SelectionStart = _log.TextLength;
-            _log.SelectionLength = 0;
-            _log.SelectionColor = color ?? Theme.TextDim;
-            _log.AppendText($"{DateTime.Now:HH:mm:ss}  {line}{Environment.NewLine}");
-            _log.SelectionColor = _log.ForeColor;
-            _log.ScrollToCaret();
+            // 每個區塊只留最後 400 行，跑久了才不會吃光記憶體
+            if (box.Lines.Length > 400)
+            {
+                box.Text = string.Join(Environment.NewLine, box.Lines[^300..]);
+            }
+
+            box.SelectionStart = box.TextLength;
+            box.SelectionLength = 0;
+            box.SelectionColor = color ?? Theme.TextDim;
+            box.AppendText($"{DateTime.Now:HH:mm:ss} {line}{Environment.NewLine}");
+            box.SelectionColor = box.ForeColor;
+            box.ScrollToCaret();
+        }
+
+        /// <summary>系統訊息一律進 Python 區塊（啟動流程的主要敘事都在那裡）。</summary>
+        private void Log(string line, Color? color = null) => Log(Pane.Python, line, color);
+
+        /// <summary>
+        /// main.py 的輸出裡混了兩種東西：uvicorn 的 HTTP 存取紀錄，
+        /// 以及我們自己 print 的 AI 推理過程。依內容分流到不同區塊。
+        /// </summary>
+        private static bool IsUvicornLine(string line)
+        {
+            string t = line.TrimStart();
+            return t.StartsWith("INFO:", StringComparison.Ordinal)
+                || t.StartsWith("WARNING:", StringComparison.Ordinal)
+                || t.StartsWith("ERROR:", StringComparison.Ordinal)
+                || t.StartsWith("CRITICAL:", StringComparison.Ordinal)
+                || t.Contains("Uvicorn running", StringComparison.Ordinal)
+                || t.Contains("Application startup", StringComparison.Ordinal)
+                || t.Contains("Started server process", StringComparison.Ordinal)
+                || t.Contains("Waiting for application", StringComparison.Ordinal);
         }
 
         private void SetStep(StepRow row, StepState state, string detail)
         {
-            if (InvokeRequired)
-            {
-                BeginInvoke(new Action(() => SetStep(row, state, detail)));
-                return;
-            }
+            if (InvokeRequired) { BeginInvoke(new Action(() => SetStep(row, state, detail))); return; }
             row.State = state;
             row.Detail = detail;
         }
 
         // ── 找出專案資料夾 ──────────────────────────────────────────
 
-        /// <summary>
-        /// 從執行檔往上找含有 main.py 的 BloxFruitsBot 資料夾。
-        /// 寫死相對路徑會在 bin/Debug/net8.0-windows 這種深度下失效，
-        /// 而且使用者把 exe 搬走之後就再也找不到。
-        /// </summary>
         private void LocateBotDirectory()
         {
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
             for (int i = 0; i < 8 && dir != null; i++, dir = dir.Parent)
             {
                 string candidate = Path.Combine(dir.FullName, "BloxFruitsBot");
-                if (File.Exists(Path.Combine(candidate, "main.py")))
-                {
-                    _botDir = candidate;
-                    break;
-                }
+                if (File.Exists(Path.Combine(candidate, "main.py"))) { _botDir = candidate; break; }
                 if (File.Exists(Path.Combine(dir.FullName, "main.py")) &&
                     File.Exists(Path.Combine(dir.FullName, "BloxFruitsBot.csproj")))
                 {
-                    _botDir = dir.FullName;
-                    break;
+                    _botDir = dir.FullName; break;
                 }
             }
 
@@ -307,7 +454,6 @@ namespace BloxFruitsLauncher
                 _btnStart.Enabled = false;
                 return;
             }
-
             Log($"專案資料夾: {_botDir}", Theme.TextDim);
         }
 
@@ -322,7 +468,7 @@ namespace BloxFruitsLauncher
             _cts = new CancellationTokenSource();
             CancellationToken token = _cts.Token;
 
-            foreach (var s in new[] { _stepPython, _stepOllama, _stepServer, _stepBot })
+            foreach (var s in new[] { _stepPython, _stepOllama, _stepRoblox, _stepServer, _stepBot })
             {
                 SetStep(s, StepState.Pending, "");
             }
@@ -332,6 +478,7 @@ namespace BloxFruitsLauncher
             {
                 if (!await CheckPythonAsync(token)) { Abort(); return; }
                 if (!await CheckOllamaAsync(token)) { Abort(); return; }
+                if (!await EnsureRobloxAsync(token)) { Abort(); return; }
                 if (!StartAiServer()) { Abort(); return; }
 
                 SetStep(_stepServer, StepState.Running, "等待伺服器就緒…");
@@ -341,14 +488,10 @@ namespace BloxFruitsLauncher
                 if (!StartBot()) { Abort(); return; }
 
                 Log("全部啟動完成。", Theme.Ok);
-                if (_dryRun.Checked)
-                {
-                    Log("觀察模式：不會送出按鍵，也不會搶走視窗焦點。", Theme.Warn);
-                }
-                else
-                {
-                    Log("Bot 會把 Roblox 拉到前景並實際操作，要停請按「停止」。", Theme.Warn);
-                }
+                Log(_dryRun.Checked
+                        ? "觀察模式：不會送出按鍵，也不會搶走視窗焦點。"
+                        : "Bot 會把 Roblox 拉到前景並實際操作，要停請按「停止」。",
+                    Theme.Warn);
             }
             catch (OperationCanceledException)
             {
@@ -363,14 +506,8 @@ namespace BloxFruitsLauncher
             void Abort()
             {
                 StopAll(quiet: true);
-                if (!IsDisposed)
-                {
-                    BeginInvoke(new Action(() =>
-                    {
-                        _btnStart.Enabled = true;
-                        _btnStop.Enabled = false;
-                    }));
-                }
+                if (IsDisposed) return;
+                BeginInvoke(new Action(() => { _btnStart.Enabled = true; _btnStop.Enabled = false; }));
             }
         }
 
@@ -410,11 +547,11 @@ namespace BloxFruitsLauncher
             SetStep(_stepOllama, StepState.Running, $"下載 {model}（首次可能要好幾分鐘）…");
             Log($"本機沒有 {model}，開始下載。視覺模型約數 GB，請耐心等候。", Theme.Warn);
 
-            var (pullCode, _) = await RunCaptureAsync("ollama", $"pull {model}", token, timeoutMs: 45 * 60 * 1000);
+            var (pullCode, pullMsg) = await RunCaptureAsync("ollama", $"pull {model}", token, timeoutMs: 45 * 60 * 1000);
             if (pullCode != 0)
             {
                 SetStep(_stepOllama, StepState.Fail, $"{model} 下載失敗");
-                Log($"下載 {model} 失敗。請確認模型名稱正確且網路正常。", Theme.Fail);
+                Log($"下載 {model} 失敗: {pullMsg}", Theme.Fail);
                 return false;
             }
 
@@ -422,11 +559,71 @@ namespace BloxFruitsLauncher
             return true;
         }
 
+        /// <summary>
+        /// 確保 Roblox 已經在執行。找不到就停下來，不要硬跑 ——
+        /// 沒有遊戲視窗時截圖會退回全螢幕，AI 看到的是桌面，決策全是廢的。
+        /// </summary>
+        private async Task<bool> EnsureRobloxAsync(CancellationToken token)
+        {
+            const string title = "Roblox";
+            SetStep(_stepRoblox, StepState.Running, "尋找遊戲視窗…");
+
+            if (NativeWindows.Exists(title))
+            {
+                SetStep(_stepRoblox, StepState.Ok, "已在執行");
+                return true;
+            }
+
+            if (!_autoRoblox.Checked)
+            {
+                SetStep(_stepRoblox, StepState.Fail, "找不到 Roblox 視窗");
+                Log("找不到 Roblox 視窗。請先手動開啟遊戲，或勾選「啟動時自動開啟 Roblox」。", Theme.Fail);
+                return false;
+            }
+
+            string link = _robloxLink.Text.Trim();
+            if (string.IsNullOrEmpty(link)) link = "roblox://";
+
+            SetStep(_stepRoblox, StepState.Running, $"啟動 {link} …");
+            Log($"Roblox 尚未執行，嘗試開啟: {link}", Theme.TextDim);
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(link) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                SetStep(_stepRoblox, StepState.Fail, "無法啟動 Roblox");
+                Log($"啟動 Roblox 失敗: {ex.Message}", Theme.Fail);
+                Log("可以改填遊戲網址（https://www.roblox.com/games/...）或 RobloxPlayerBeta.exe 的完整路徑。", Theme.TextDim);
+                return false;
+            }
+
+            // 從點擊到遊戲視窗出現通常要一段時間，尤其第一次啟動
+            for (int waited = 0; waited < 120; waited++)
+            {
+                await Task.Delay(1000, token);
+                if (NativeWindows.Exists(title))
+                {
+                    SetStep(_stepRoblox, StepState.Ok, $"已開啟（等待 {waited + 1} 秒）");
+                    Log("Roblox 視窗已出現。請確認你已經進到遊戲畫面裡，不是登入頁或選單。", Theme.Warn);
+                    return true;
+                }
+                if (waited % 10 == 9)
+                {
+                    SetStep(_stepRoblox, StepState.Running, $"等待遊戲視窗… {waited + 1}s");
+                }
+            }
+
+            SetStep(_stepRoblox, StepState.Fail, "等了 120 秒仍未出現");
+            Log("等待 Roblox 視窗逾時。請手動開啟遊戲後再按啟動。", Theme.Fail);
+            return false;
+        }
+
         private bool StartAiServer()
         {
             SetStep(_stepServer, StepState.Running, "啟動 FastAPI…");
-            var p = StartTracked("python", "main.py", "AI");
-            if (p == null)
+            if (StartTracked("python", "main.py", Pane.Python) == null)
             {
                 SetStep(_stepServer, StepState.Fail, "無法啟動 main.py");
                 return false;
@@ -437,8 +634,7 @@ namespace BloxFruitsLauncher
         private bool StartBot()
         {
             SetStep(_stepBot, StepState.Running, "編譯並啟動…");
-            var p = StartTracked("dotnet", "run --project BloxFruitsBot.csproj -c Release", "BOT");
-            if (p == null)
+            if (StartTracked("dotnet", "run --project BloxFruitsBot.csproj -c Release", Pane.Bot) == null)
             {
                 SetStep(_stepBot, StepState.Fail, "無法啟動 dotnet run");
                 return false;
@@ -460,7 +656,7 @@ namespace BloxFruitsLauncher
             psi.Environment["PYTHONUNBUFFERED"] = "1";
         }
 
-        private Process? StartTracked(string exe, string args, string tag)
+        private Process? StartTracked(string exe, string args, Pane pane)
         {
             try
             {
@@ -479,10 +675,22 @@ namespace BloxFruitsLauncher
                 ApplySettings(psi);
 
                 var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
-                Color tint = tag == "AI" ? Theme.Accent : Theme.Ok;
-                proc.OutputDataReceived += (_, e) => { if (e.Data != null) Log($"[{tag}] {e.Data}", tint); };
-                proc.ErrorDataReceived += (_, e) => { if (e.Data != null) Log($"[{tag}] {e.Data}", Theme.Warn); };
-                proc.Exited += (_, _) => Log($"[{tag}] 行程結束。", Theme.TextDim);
+
+                void Route(string? data, bool isError)
+                {
+                    if (data == null) return;
+                    // python 那條會再依內容拆成 Python / FastAPI 兩個區塊
+                    Pane target = pane == Pane.Python && IsUvicornLine(data) ? Pane.Api : pane;
+                    Color tint = isError ? Theme.Warn
+                        : target == Pane.Bot ? Theme.Ok
+                        : target == Pane.Api ? Theme.TextDim
+                        : Theme.Text;
+                    Log(target, data, tint);
+                }
+
+                proc.OutputDataReceived += (_, e) => Route(e.Data, false);
+                proc.ErrorDataReceived += (_, e) => Route(e.Data, true);
+                proc.Exited += (_, _) => Log(pane, "行程結束。", Theme.TextDim);
 
                 proc.Start();
                 proc.BeginOutputReadLine();
@@ -492,7 +700,7 @@ namespace BloxFruitsLauncher
             }
             catch (Exception ex)
             {
-                Log($"[{tag}] 啟動失敗: {ex.Message}", Theme.Fail);
+                Log(pane, $"啟動失敗: {ex.Message}", Theme.Fail);
                 return null;
             }
         }
@@ -547,7 +755,6 @@ namespace BloxFruitsLauncher
             }
             catch (Exception ex)
             {
-                // 找不到執行檔會走到這裡，回非零讓呼叫端統一處理
                 return (-1, ex.Message);
             }
         }
@@ -560,10 +767,7 @@ namespace BloxFruitsLauncher
             {
                 foreach (var p in _children)
                 {
-                    try
-                    {
-                        if (!p.HasExited) p.Kill(entireProcessTree: true);
-                    }
+                    try { if (!p.HasExited) p.Kill(entireProcessTree: true); }
                     catch { /* 已經結束就算了 */ }
                     finally { p.Dispose(); }
                 }
@@ -587,23 +791,13 @@ namespace BloxFruitsLauncher
                 Log("還沒有 last_frame.jpg — 先啟動 Bot 跑一輪。", Theme.Warn);
                 return;
             }
-            try
-            {
-                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-            }
-            catch (Exception ex)
-            {
-                Log($"無法開啟圖片: {ex.Message}", Theme.Fail);
-            }
+            try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
+            catch (Exception ex) { Log($"無法開啟圖片: {ex.Message}", Theme.Fail); }
         }
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
-            {
-                _pulseTimer.Dispose();
-                _fadeTimer.Dispose();
-            }
+            if (disposing) { _pulseTimer.Dispose(); _fadeTimer.Dispose(); }
             base.Dispose(disposing);
         }
     }

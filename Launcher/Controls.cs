@@ -19,7 +19,7 @@ namespace BloxFruitsLauncher
         public Color BaseColor { get; set; } = Theme.SurfaceHi;
         public Color HoverColor { get; set; } = Theme.Border;
         public Color LabelColor { get; set; } = Theme.Text;
-        public int Radius { get; set; } = 8;
+        public int Radius { get; set; } = 18;   // Android 風格的大圓角
 
         public FlatButton()
         {
@@ -191,4 +191,154 @@ namespace BloxFruitsLauncher
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
     }
+
+
+    /// <summary>
+    /// 圓角容器。WinForms 的 ComboBox / NumericUpDown 沒辦法直接做圓角，
+    /// 所以把它們塞進這個自繪的圓角面板裡，外框由面板畫、內層控制項無邊框，
+    /// 看起來就像 Android 的填色輸入框。
+    /// </summary>
+    internal sealed class RoundedPanel : Panel
+    {
+        public int Radius { get; set; } = 14;
+        public Color Fill { get; set; } = Theme.SurfaceHi;
+        public Color Stroke { get; set; } = Color.Empty;
+
+        public RoundedPanel()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint
+                   | ControlStyles.OptimizedDoubleBuffer
+                   | ControlStyles.ResizeRedraw
+                   | ControlStyles.UserPaint
+                   | ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            var rect = new Rectangle(0, 0, Width - 1, Height - 1);
+            using var path = Theme.RoundedRect(rect, Radius);
+            using (var brush = new SolidBrush(Fill))
+            {
+                g.FillPath(brush, path);
+            }
+            if (Stroke != Color.Empty)
+            {
+                using var pen = new Pen(Stroke, 1f);
+                g.DrawPath(pen, path);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 自繪勾選框：圓角方塊 + 勾，切換時有短暫的過渡動畫。
+    /// 內建的 CheckBox 是系統繪製，配不上深色圓角的其他控制項。
+    /// </summary>
+    internal sealed class RoundedCheckBox : Control
+    {
+        private bool _checked;
+        private float _t;          // 0 = 未勾, 1 = 已勾
+        private readonly Timer _anim;
+
+        public event EventHandler? CheckedChanged;
+
+        public bool Checked
+        {
+            get => _checked;
+            set
+            {
+                if (_checked == value) return;
+                _checked = value;
+                _anim.Start();
+                CheckedChanged?.Invoke(this, EventArgs.Empty);
+                Invalidate();
+            }
+        }
+
+        public RoundedCheckBox()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint
+                   | ControlStyles.OptimizedDoubleBuffer
+                   | ControlStyles.ResizeRedraw
+                   | ControlStyles.UserPaint
+                   | ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+            Cursor = Cursors.Hand;
+            Height = 26;
+
+            _anim = new Timer { Interval = 16 };
+            _anim.Tick += (_, _) =>
+            {
+                float target = _checked ? 1f : 0f;
+                if (Math.Abs(_t - target) < 0.02f)
+                {
+                    _t = target;
+                    _anim.Stop();
+                }
+                else
+                {
+                    _t += (target - _t) * 0.25f;
+                }
+                Invalidate();
+            };
+        }
+
+        protected override void OnClick(EventArgs e)
+        {
+            base.OnClick(e);
+            Checked = !Checked;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            const int box = 19;
+            int top = (Height - box) / 2;
+            var boxRect = new Rectangle(0, top, box, box);
+
+            using (var path = Theme.RoundedRect(boxRect, 6))
+            {
+                using var fill = new SolidBrush(Theme.Lerp(Theme.SurfaceHi, Theme.Accent, _t));
+                g.FillPath(fill, path);
+                if (_t < 0.5f)
+                {
+                    using var pen = new Pen(Theme.Border, 1.4f);
+                    g.DrawPath(pen, path);
+                }
+            }
+
+            if (_t > 0.05f)
+            {
+                using var pen = new Pen(Color.FromArgb((int)(255 * _t), 12, 18, 28), 2.2f)
+                {
+                    StartCap = LineCap.Round,
+                    EndCap = LineCap.Round,
+                };
+                float cx = boxRect.X, cy = boxRect.Y;
+                g.DrawLines(pen, new[]
+                {
+                    new PointF(cx + 4.5f, cy + 9.5f),
+                    new PointF(cx + 8.0f, cy + 13.0f),
+                    new PointF(cx + 14.5f, cy + 5.5f),
+                });
+            }
+
+            var textRect = new Rectangle(box + 10, 0, Width - box - 10, Height);
+            TextRenderer.DrawText(g, Text, Font, textRect, Theme.Text,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _anim.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
 }
