@@ -20,6 +20,7 @@ namespace BloxFruitsLauncher
         private const int ContentWidth = 1040;
 
         private readonly BackdropPanel _root = new() { Dock = DockStyle.Fill };
+        private Panel? _header;
 
         // ── 啟動步驟 ────────────────────────────────────────────────
         private readonly StepRow _stepPython = new() { Title = "◢ 執行時核心 · PYTHON" };
@@ -96,6 +97,25 @@ namespace BloxFruitsLauncher
         {
             int pad = Math.Max(24, (ClientSize.Width - ContentWidth) / 2);
             _root.Padding = new Padding(pad, 0, pad, 20);
+
+            // 透明子控制項疊在自繪背景上時，父容器重畫不會連帶重畫它們，
+            // 縮放過程會留下殘影。true = 連同所有子控制項一起失效。
+            _root.Invalidate(true);
+            _header?.Invalidate();
+        }
+
+        /// <summary>
+        /// 開啟 WS_EX_COMPOSITED，讓整個視窗離屏合成後才上螢幕。
+        /// 這是自繪背景 + 透明子控制項在縮放時閃爍與錯位的標準解法。
+        /// </summary>
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x02000000;   // WS_EX_COMPOSITED
+                return cp;
+            }
         }
 
         // ── 版面 ────────────────────────────────────────────────────
@@ -121,6 +141,10 @@ namespace BloxFruitsLauncher
         private Panel BuildHeader()
         {
             var header = new Panel { Dock = DockStyle.Top, Height = 112, BackColor = Theme.Surface };
+            _header = header;
+            // Panel 預設不在尺寸改變時重繪，視窗變寬後標題會停在舊寬度的中心，
+            // 底線也只畫到舊寬度為止。必須自己觸發整塊重畫。
+            header.Resize += (_, _) => header.Invalidate();
             header.Paint += (_, e) =>
             {
                 Graphics g = e.Graphics;

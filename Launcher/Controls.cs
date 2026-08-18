@@ -192,12 +192,15 @@ namespace BloxFruitsLauncher
                 });
             }
 
-            var titleRect = new Rectangle(26, 0, 200, Height);
+            // 標題欄寬度隨控制項寬度算，寫死 200px 會把較長的標題切掉
+            int titleW = Math.Max(170, Math.Min(380, (int)(Width * 0.42f)));
+            var titleRect = new Rectangle(26, 0, titleW, Height);
             TextRenderer.DrawText(g, Title, Theme.FontStep, titleRect,
                 _state == StepState.Pending ? Theme.TextDim : Theme.Text,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
 
-            var detailRect = new Rectangle(230, 0, Width - 238, Height);
+            int detailX = 26 + titleW + 14;
+            var detailRect = new Rectangle(detailX, 0, Math.Max(0, Width - detailX - 8), Height);
             TextRenderer.DrawText(g, _detail, Theme.FontDetail, detailRect,
                 _state == StepState.Fail ? Theme.Fail : Theme.TextDim,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
