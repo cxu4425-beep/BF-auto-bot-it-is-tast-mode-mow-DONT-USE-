@@ -8,6 +8,7 @@ using System.IO;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -63,6 +64,37 @@ namespace BloxFruitsBot
         // 截圖照樣正確，代價是按鍵可能送不進遊戲（除非它剛好是前景）。
         private static readonly bool FocusWindow = ReadEnvBool("BOT_FOCUS_WINDOW", true);
 
+        // 觀察模式下絕對不該搶焦點。DryRun 不送任何輸入，也就沒有「必須是前景」
+        // 的理由，而搶焦點正好毀掉觀察模式唯一的用途 —— 你要能一邊自己玩、
+        // 一邊在旁邊看它怎麼判斷。
+        //
+        // 啟動訊息本來就印著「也不搶視窗焦點」，但 EnsureTargetForeground() 只檢查
+        // FocusWindow，而它預設是 true。也就是說只設 BOT_DRY_RUN=1 的人，
+        // 看到的訊息和實際行為是相反的。
+        private static bool ShouldFocusWindow => FocusWindow && !DryRun;
+
+        // 決策紀錄（JSONL，一行一步）。這是評估決策品質的原始資料。
+        // 終端機捲過去的字沒辦法拿來算「IDLE 佔幾成」「延遲 p95 是多少」，
+        // 必須落成檔案才統計得出來。設 BOT_DECISION_LOG=0 關閉。
+        private static readonly string? DecisionLogPath = ResolveOptionalPath(
+            "BOT_DECISION_LOG", "decisions.jsonl");
+
+        // 每一步實際送給模型的那張畫面，檔名對得上紀錄裡的 step。
+        // 統計說「IDLE 佔七成」的時候，你會想知道那七成當下畫面長什麼樣。
+        // 一張約 40KB，10 分鐘的觀察大概 12MB。設 BOT_OBSERVE_FRAMES=0 關閉。
+        private static readonly string? ObserveFramesDir = ResolveOptionalPath(
+            "BOT_OBSERVE_FRAMES", "observe_frames");
+
+        // 標記這次跑的是哪個設定（baseline / fewshot / ...）。做 A/B 對照時，
+        // 少了這個標籤，事後就分不出兩份紀錄各是哪一邊。
+        private static readonly string RunTag =
+            Environment.GetEnvironmentVariable("BOT_RUN_TAG") ?? "";
+
+        // ConvertBitmapToBase64() 編出來的 JPEG 位元組，讓迴圈能原封不動存檔。
+        // 重點在「原封不動」：存的必須是送出去的那一份。重新編一次可能不一樣，
+        // 那樣存下來的就不是模型看到的東西，對照也就失去意義。
+        private static byte[]? _lastFrameJpeg;
+
         // 由舊到新的影格緩衝
         private static readonly Queue<string> _frameHistory = new Queue<string>();
 
@@ -93,6 +125,23 @@ namespace BloxFruitsBot
             return raw == "1"
                 || raw.Equals("true", StringComparison.OrdinalIgnoreCase)
                 || raw.Equals("yes", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 讀一個「路徑或關閉」的環境變數：沒設就用預設值，設成 0 / false 則回 null。
+        /// </summary>
+        private static string? ResolveOptionalPath(string name, string fallback)
+        {
+            string? raw = Environment.GetEnvironmentVariable(name)?.Trim();
+            if (string.IsNullOrEmpty(raw))
+            {
+                return Path.GetFullPath(fallback);
+            }
+            if (raw == "0" || raw.Equals("false", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            return Path.GetFullPath(raw);
         }
 
         /// <summary>
@@ -173,7 +222,7 @@ namespace BloxFruitsBot
         /// </summary>
         private static void EnsureTargetForeground()
         {
-            if (_targetWindowHwnd == IntPtr.Zero || !FocusWindow)
+            if (_targetWindowHwnd == IntPtr.Zero || !ShouldFocusWindow)
             {
                 return;
             }
@@ -241,6 +290,20 @@ namespace BloxFruitsBot
                 Console.WriteLine("[警告] 且遊戲視窗一旦被遮住，截到的就是蓋在上面的視窗。");
             }
 
+            if (DecisionLogPath != null)
+            {
+                Console.WriteLine($"[OK] 決策紀錄寫入: {DecisionLogPath}");
+                Console.WriteLine("[提示] 跑完用 python analyze_decisions.py <這個檔案> 產生統計報告。");
+            }
+            if (ObserveFramesDir != null)
+            {
+                Console.WriteLine($"[OK] 每步畫面存到: {ObserveFramesDir}（檔名對應紀錄裡的 step）");
+            }
+            if (RunTag.Length > 0)
+            {
+                Console.WriteLine($"[OK] 本次執行標籤: {RunTag}（BOT_RUN_TAG，用來區分 A/B 兩組紀錄）");
+            }
+
             Console.WriteLine("[OK] 目前的動作對應（用 BOT_ACTION_<動作名> 可覆寫）：");
             foreach (var pair in ActionMap)
             {
@@ -251,7 +314,8 @@ namespace BloxFruitsBot
             int step = 1;
             while (true)
             {
-                Console.WriteLine($"\n------------------ [步驟 {step++}] ------------------");
+                int currentStep = step++;
+                Console.WriteLine($"\n------------------ [步驟 {currentStep}] ------------------");
                 try
                 {
                     // A. 【Perception】截取遊戲視窗並轉成 Base64
@@ -306,9 +370,20 @@ namespace BloxFruitsBot
                         Console.WriteLine($"[AI 決定動作 (Action)] -> {decision.Action}");
                         Console.ResetColor();
 
+                        if (decision.Degenerate)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            Console.WriteLine("[警告] 這一步模型輸出退化，不是有效決策（統計時會單獨列出）。");
+                            Console.ResetColor();
+                        }
+
                         // D. 【Action】執行鍵盤/滑鼠驅動操作，並回報結果
                         _lastAction = decision.Action;
                         _lastResult = ExecuteGameAction(decision.Action);
+
+                        // E. 【Record】留下可統計的紀錄。放在動作之後才記得到執行結果。
+                        RecordDecision(currentStep, sw.ElapsedMilliseconds, frames.Count,
+                                       decision, _lastResult);
                     }
                 }
                 catch (HttpRequestException ex)
@@ -439,6 +514,7 @@ namespace BloxFruitsBot
                     // 使用 JPEG 格式壓縮可以有效減少 Base64 封包大小與加速網路傳輸
                     toEncode.Save(ms, ImageFormat.Jpeg);
                     byte[] byteImage = ms.ToArray();
+                    _lastFrameJpeg = byteImage;
 
                     if (SaveFramePath != null)
                     {
@@ -462,6 +538,83 @@ namespace BloxFruitsBot
                 {
                     toEncode.Dispose();
                 }
+            }
+        }
+
+        // 寫 JSONL 用的設定。UnsafeRelaxedJsonEscaping 是為了讓中文的 thought 直接
+        // 可讀，而不是一整排 \uXXXX —— 這是本機診斷檔，不會被塞進 HTML。
+        // 一定要用不帶 BOM 的 UTF-8。Encoding.UTF8 這個靜態屬性是帶 BOM 的，
+        // AppendAllText 在檔案剛建立時會把那三個位元組寫進去，於是第一行開頭
+        // 多出 \ufeff，逐行 json.loads 就會在第一行掛掉。
+        private static readonly Encoding LogEncoding = new UTF8Encoding(false);
+
+        private static readonly JsonSerializerOptions LogJsonOptions = new JsonSerializerOptions
+        {
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            WriteIndented = false, // 一步一行，才能用 JSONL 逐行讀
+        };
+
+        /// <summary>
+        /// 把這一步的決策追加到紀錄檔，並存下送給模型的那張畫面。
+        /// 任何失敗都只印警告：這是診斷用途，不該把正在跑的 bot 弄掛。
+        /// </summary>
+        private static void RecordDecision(int step, long latencyMs, int framesSent,
+                                           DecisionResponse decision, string executed)
+        {
+            string frameRelPath = "";
+            string? framesDir = ObserveFramesDir;
+            byte[]? frameJpeg = _lastFrameJpeg;
+            if (framesDir != null && frameJpeg != null)
+            {
+                try
+                {
+                    Directory.CreateDirectory(framesDir);
+                    string fileName = $"{step:D6}.jpg";
+                    File.WriteAllBytes(Path.Combine(framesDir, fileName), frameJpeg);
+                    frameRelPath = fileName;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[警告] 無法寫入觀察畫面: {ex.Message}");
+                }
+            }
+
+            string? logPath = DecisionLogPath;
+            if (logPath == null)
+            {
+                return;
+            }
+
+            try
+            {
+                string? logDir = Path.GetDirectoryName(logPath);
+                if (!string.IsNullOrEmpty(logDir))
+                {
+                    Directory.CreateDirectory(logDir);
+                }
+
+                var entry = new DecisionLogEntry
+                {
+                    Step = step,
+                    Ts = DateTime.UtcNow.ToString("o"),
+                    Tag = RunTag,
+                    LatencyMs = latencyMs,
+                    Action = decision.Action,
+                    RawAction = decision.RawAction,
+                    Thought = decision.Thought,
+                    Degenerate = decision.Degenerate,
+                    FramesSent = framesSent,
+                    Frame = frameRelPath,
+                    DryRun = DryRun,
+                    Executed = executed,
+                };
+                File.AppendAllText(logPath,
+                                   JsonSerializer.Serialize(entry, LogJsonOptions) + Environment.NewLine,
+                                   LogEncoding);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[警告] 無法寫入決策紀錄: {ex.Message}");
             }
         }
 
@@ -682,5 +835,33 @@ namespace BloxFruitsBot
 
         [JsonPropertyName("action")]
         public string Action { get; set; } = string.Empty;
+
+        // 模型陷入重複字元迴圈。這種回合會被安全網變成 IDLE 送回來，
+        // 不標記出來的話，統計上就會和「AI 認真決定不動」混在一起，
+        // 而這兩件事的意義完全相反：一個是模型壞了，一個是模型的判斷。
+        [JsonPropertyName("degenerate")]
+        public bool Degenerate { get; set; }
+
+        // 正規化前模型原本吐出來的動作字串。用來看它實際的用詞習慣，
+        // 也才知道 ACTION_ALIASES 還漏接了哪些講法。
+        [JsonPropertyName("raw_action")]
+        public string RawAction { get; set; } = string.Empty;
+    }
+
+    /// <summary>決策紀錄的一行。欄位名稱要和 analyze_decisions.py 對得上。</summary>
+    public class DecisionLogEntry
+    {
+        [JsonPropertyName("step")] public int Step { get; set; }
+        [JsonPropertyName("ts")] public string Ts { get; set; } = string.Empty;
+        [JsonPropertyName("tag")] public string Tag { get; set; } = string.Empty;
+        [JsonPropertyName("latency_ms")] public long LatencyMs { get; set; }
+        [JsonPropertyName("action")] public string Action { get; set; } = string.Empty;
+        [JsonPropertyName("raw_action")] public string RawAction { get; set; } = string.Empty;
+        [JsonPropertyName("thought")] public string Thought { get; set; } = string.Empty;
+        [JsonPropertyName("degenerate")] public bool Degenerate { get; set; }
+        [JsonPropertyName("frames_sent")] public int FramesSent { get; set; }
+        [JsonPropertyName("frame")] public string Frame { get; set; } = string.Empty;
+        [JsonPropertyName("dry_run")] public bool DryRun { get; set; }
+        [JsonPropertyName("executed")] public string Executed { get; set; } = string.Empty;
     }
 }

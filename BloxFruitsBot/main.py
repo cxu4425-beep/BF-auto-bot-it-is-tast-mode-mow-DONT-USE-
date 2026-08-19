@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 
@@ -69,6 +70,54 @@ def _parse_keep_alive(raw: str):
 
 
 KEEP_ALIVE = _parse_keep_alive(os.getenv("BOT_KEEP_ALIVE", "-1"))
+
+
+# 少量範例（few-shot）。指向一個資料夾，裡面一張圖配一個同名 .txt，
+# .txt 的內容就是我們希望模型照抄的回覆，例如：
+#     THOUGHT: A quest NPC with an Interact prompt is directly ahead.
+#     ACTION: TALK_TO_NPC
+#
+# 這是「不訓練就改善判斷」最便宜的一招，但有真實風險：範例圖會一起送進去，
+# 而這個模型在影像token變多時會退化成一整串 "@"（實測 800px 單張就會）。
+# 所以範例要少、要小，而且一定要用 analyze_decisions.py 跟沒開的時候對照，
+# 不要憑感覺認定它變好了。
+FEWSHOT_DIR = os.getenv("BOT_FEWSHOT_DIR", "").strip()
+
+
+def load_fewshot(directory: str) -> list[tuple[str, str]]:
+    """讀出 (base64 圖片, 標準答案) 配對，依檔名排序以保證順序穩定。"""
+    if not directory:
+        return []
+    if not os.path.isdir(directory):
+        print(f"⚠️  [警告] BOT_FEWSHOT_DIR 不存在: {directory}，本次不使用範例")
+        return []
+
+    pairs: list[tuple[str, str]] = []
+    for name in sorted(os.listdir(directory)):
+        stem, ext = os.path.splitext(name)
+        if ext.lower() not in (".jpg", ".jpeg", ".png"):
+            continue
+        label_path = os.path.join(directory, stem + ".txt")
+        if not os.path.exists(label_path):
+            print(f"⚠️  [警告] 範例 {name} 找不到對應的 {stem}.txt，略過")
+            continue
+        with open(os.path.join(directory, name), "rb") as fh:
+            raw = fh.read()
+        with open(label_path, encoding="utf-8") as fh:
+            label = fh.read().strip()
+        if not label:
+            print(f"⚠️  [警告] 範例 {stem}.txt 是空的，略過")
+            continue
+        pairs.append((base64.b64encode(raw).decode("ascii"), label))
+        print(f"   範例 {len(pairs)}: {name} ({len(raw) // 1024}KB) -> {label.splitlines()[-1][:60]}")
+
+    return pairs
+
+
+FEWSHOT = load_fewshot(FEWSHOT_DIR)
+if FEWSHOT:
+    print(f"✅ [設定] 已載入 {len(FEWSHOT)} 個範例，每輪會多送 {len(FEWSHOT)} 張圖片。")
+    print("   如果開始出現退化警告，就減少範例數量或把範例圖縮小。")
 
 
 ACTION_LIST = (
@@ -156,7 +205,8 @@ class DecisionRequest(BaseModel):
         return [self.image_base64] if self.image_base64 else []
 
 
-def build_prompt(frame_count: int, last_result: str) -> str:
+def build_prompt(frame_count: int, last_result: str,
+                 examples: list[tuple[str, str]] | None = None) -> str:
     """組出提示詞。單張和多張的措辭必須不同 —— 只有一張畫面時
     叫模型「比較各影格」只會讓它憑空捏造變化。"""
 
@@ -181,9 +231,31 @@ def build_prompt(frame_count: int, last_result: str) -> str:
         "While in the game world, standing still is almost never correct.\n\n"
     )
 
+    # 範例圖排在現況畫面「之前」送出，所以提示詞必須先交代前面幾張是範例，
+    # 否則模型會把範例當成現在的畫面來判斷 —— 那比沒有範例更糟。
+    examples = examples or []
+    if examples:
+        shots = "".join(
+            f"Example {i} (see image {i}):\n{label}\n\n"
+            for i, (_, label) in enumerate(examples, 1)
+        )
+        example_block = (
+            f"The first {len(examples)} images are solved examples. "
+            "Each one is followed by the correct answer:\n\n"
+            + shots
+            + "Now answer for the images that come after those examples.\n"
+        )
+        live = "image is" if frame_count == 1 else f"{frame_count} images are"
+        which = f"The LAST {live} the live situation. They are "
+    else:
+        example_block = ""
+        which = "You are given "
+
     if frame_count > 1:
         head = (
-            f"You are given {frame_count} consecutive frames, oldest first, about one "
+            example_block
+            + which
+            + f"{frame_count} consecutive frames, oldest first, about one "
             "second apart. The LAST image is the current screen.\n"
             f"The last key/action sent to the game was: {last_result}.\n"
             "Compare the frames to judge whether it worked - whether the character "
@@ -192,7 +264,9 @@ def build_prompt(frame_count: int, last_result: str) -> str:
         )
     else:
         head = (
-            f"The last key/action sent to the game was: {last_result}.\n"
+            example_block
+            + ("The LAST image is the live situation.\n" if examples else "")
+            + f"The last key/action sent to the game was: {last_result}.\n"
             "This only tells you which key was pressed, not whether it worked - "
             "judge success or failure yourself from the image.\n"
         )
@@ -209,17 +283,41 @@ def build_prompt(frame_count: int, last_result: str) -> str:
     )
 
 
+def reply(thought: str, action: str, *, degenerate: bool = False, raw_action: str = ""):
+    """統一的回覆格式。
+
+    degenerate 一定要單獨標記出來：退化的回合會被安全網變成 IDLE，
+    不區分的話，統計上「模型壞掉」就和「模型決定不動」混成同一格，
+    而這兩件事該採取的對策完全相反。
+    """
+    return {
+        "thought": thought,
+        "action": action,
+        "degenerate": degenerate,
+        "raw_action": raw_action,
+    }
+
+
 @app.post("/decide")
 def decide(request: DecisionRequest):
     frames = request.frames()
     if not frames:
         print("❌ [錯誤] 請求沒有夾帶任何影像")
-        return {"thought": "No image supplied", "action": "IDLE"}
+        return reply("No image supplied", "IDLE")
 
-    total = sum(len(f) for f in frames)
-    print(f"\n📥 [系統提示] 收到 C# {len(frames)} 張影格，共約 {total} 字元，送往 {MODEL}...")
+    # 範例圖排在前面，現況畫面在後 —— build_prompt() 的措辭是照這個順序寫的，
+    # 兩邊要一起改，不然模型會把範例當成現在的畫面。
+    images = [b64 for b64, _ in FEWSHOT] + frames
 
-    prompt = build_prompt(len(frames), request.last_result)
+    total = sum(len(f) for f in images)
+    print(f"\n📥 [系統提示] 收到 C# {len(frames)} 張影格"
+          + (f" + {len(FEWSHOT)} 張範例" if FEWSHOT else "")
+          + f"，共約 {total} 字元，送往 {MODEL}...")
+    if len(images) > 4:
+        print(f"⚠️  [警告] 這輪要送 {len(images)} 張圖片。影像token過多正是這個模型退化的成因，"
+              "看到退化警告就先減範例。")
+
+    prompt = build_prompt(len(frames), request.last_result, FEWSHOT)
 
     try:
         ollama_response = requests.post(
@@ -227,7 +325,7 @@ def decide(request: DecisionRequest):
             json={
                 "model": MODEL,
                 "prompt": prompt,
-                "images": frames,
+                "images": images,
                 # 💥 核心修正：移除 "format": "json"，徹底解放 AI 的嘴巴！
                 # temperature 要放在 options 裡，放最外層 Ollama 會直接忽略掉。
                 "options": {
@@ -251,10 +349,9 @@ def decide(request: DecisionRequest):
             detail = ollama_response.text.strip()
             print(f"❌ [錯誤] Ollama 服務異常，狀態碼: {ollama_response.status_code}")
             print(f"   回應內容: {detail}")
-            return {
-                "thought": f"Ollama service error {ollama_response.status_code}: {detail}",
-                "action": "IDLE",
-            }
+            return reply(
+                f"Ollama service error {ollama_response.status_code}: {detail}", "IDLE"
+            )
 
         generated_text = ollama_response.json().get("response", "").strip()
 
@@ -270,14 +367,16 @@ def decide(request: DecisionRequest):
             print("⚠️  [警告] 模型輸出退化成重複字元，這不是有效決策。")
             print(f"   目前 temperature={TEMPERATURE}, repeat_penalty={REPEAT_PENALTY}")
             print("   可調高 BOT_TEMPERATURE（例如 0.7）或縮小 BOT_MAX_IMAGE_WIDTH 再試。")
-            return {
-                "thought": "MODEL_DEGENERATED: repeated-token loop, not a real decision",
-                "action": "IDLE",
-            }
+            return reply(
+                "MODEL_DEGENERATED: repeated-token loop, not a real decision",
+                "IDLE",
+                degenerate=True,
+            )
 
         # 🛠️ 用正則表達式解析 THOUGHT 與 ACTION
         thought = ""
         action = ""
+        raw_action = ""
         
         thought_match = re.search(r"THOUGHT:\s*(.*)", generated_text, re.IGNORECASE)
         if thought_match:
@@ -301,10 +400,10 @@ def decide(request: DecisionRequest):
 
     except Exception as e:
         print(f"❌ [錯誤] 呼叫或解析 Ollama 失敗: {str(e)}")
-        thought, action = f"Error: {str(e)}", "IDLE"
-        
+        thought, action, raw_action = f"Error: {str(e)}", "IDLE", ""
+
     print(f"🚀 [傳送決策給 C#] 思考: {thought} | 動作: {action}")
-    return {"thought": thought, "action": action}
+    return reply(thought, action, raw_action=raw_action)
 
 
 if __name__ == "__main__":
