@@ -44,6 +44,7 @@ namespace BloxFruitsLauncher
         private readonly FlatButton _btnStart = new();
         private readonly FlatButton _btnStop = new();
         private readonly FlatButton _btnFrame = new();
+        private readonly FlatButton _btnRecord = new();
 
         // ── 三個輸出區塊 ────────────────────────────────────────────
         private readonly RichTextBox _logBot = new();
@@ -345,12 +346,13 @@ namespace BloxFruitsLauncher
                 Dock = DockStyle.Top,
                 BackColor = Color.Transparent,
                 Height = 66,
-                ColumnCount = 3,
+                ColumnCount = 4,
                 RowCount = 1,
             };
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34f));
+            for (int i = 0; i < 4; i++)
+            {
+                table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+            }
 
             _btnStart.Text = "▶  啟 動 系 統";
             _btnStart.BaseColor = Theme.Accent;
@@ -358,14 +360,14 @@ namespace BloxFruitsLauncher
             _btnStart.LabelColor = Color.FromArgb(4, 12, 20);
             _btnStart.GlowColor = Theme.Accent;
             _btnStart.BorderColor = Theme.Accent;
-            _btnStart.Size = new Size(180, 42);
+            _btnStart.Size = new Size(170, 42);
             _btnStart.Anchor = AnchorStyles.None;      // 在儲存格內置中
             _btnStart.Click += async (_, _) => await StartAllAsync();
 
             _btnStop.Text = "■  緊 急 停 機";
             _btnStop.GlowColor = Theme.Fail;
             _btnStop.BorderColor = Color.FromArgb(90, 40, 60);
-            _btnStop.Size = new Size(180, 42);
+            _btnStop.Size = new Size(140, 42);
             _btnStop.Anchor = AnchorStyles.None;
             _btnStop.Enabled = false;
             _btnStop.Click += (_, _) => StopAll(quiet: false);
@@ -373,13 +375,25 @@ namespace BloxFruitsLauncher
             _btnFrame.Text = "◉  檢視感知影像";
             _btnFrame.GlowColor = Theme.Violet;
             _btnFrame.BorderColor = Color.FromArgb(70, 45, 110);
-            _btnFrame.Size = new Size(210, 42);
+            _btnFrame.Size = new Size(196, 42);
             _btnFrame.Anchor = AnchorStyles.None;
             _btnFrame.Click += (_, _) => OpenLastFrame();
+
+            _btnRecord.Text = "◈  錄製示範資料";
+            _btnRecord.GlowColor = Theme.Warn;
+            _btnRecord.BorderColor = Color.FromArgb(96, 70, 24);
+            _btnRecord.Size = new Size(196, 42);
+            _btnRecord.Anchor = AnchorStyles.None;
+            _btnRecord.Click += (_, _) =>
+            {
+                using var recorder = new RecorderWindow();
+                recorder.ShowDialog(this);
+            };
 
             table.Controls.Add(_btnStart, 0, 0);
             table.Controls.Add(_btnStop, 1, 0);
             table.Controls.Add(_btnFrame, 2, 0);
+            table.Controls.Add(_btnRecord, 3, 0);
             return table;
         }
 
