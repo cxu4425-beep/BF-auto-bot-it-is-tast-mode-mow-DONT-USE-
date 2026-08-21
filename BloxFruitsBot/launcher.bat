@@ -8,7 +8,43 @@ echo ============================================
 echo.
 
 set "BOT_DIR=%~dp0"
-set "OLLAMA_MODEL=llava:7b"
+
+REM --- Tuning (child processes inherit these) ------------------------
+REM Keep this file pure ASCII. Batch files are read using the console's
+REM OEM codepage, so UTF-8 comments arrive as mojibake, and any byte that
+REM lands on an ampersand is treated as a command separator. REM does not
+REM protect against that, so cmd ends up executing the garbage.
+
+REM Vision model. qwen2.5vl:3b is trained for GUI/screen-agent work and is
+REM about 3.2GB, which leaves room on an 8GB card for the game itself.
+REM Change this one line to switch models - main.py and fastapi_server.py
+REM both read BOT_MODEL.
+set "OLLAMA_MODEL=qwen2.5vl:3b"
+set "BOT_MODEL=%OLLAMA_MODEL%"
+
+REM Extra delay between rounds, in ms. This is ADDED to inference time, it
+REM is not a target period: one round = inference + this value. Inference
+REM measured about 1.8s on an 8GB card, so keep this small. 2000 would
+REM stretch each round to nearly 4 seconds, which is too sluggish.
+set "BOT_LOOP_DELAY_MS=200"
+
+REM Screenshot width cap before the frame is sent to the model.
+REM
+REM 400 is measured, not guessed. Feeding qwen2.5vl:3b the same game frame:
+REM   800px -> model degenerates into a run of "@" (even at num_ctx 16384)
+REM   400px -> correctly describes "a character sitting on a couch"
+REM   200px -> hallucinates, calls the screen Minecraft
+REM There is a usable band with a ceiling and a floor; 400 sits inside it.
+REM Smaller is also faster, since vision tokens scale with pixel count.
+set "BOT_MAX_IMAGE_WIDTH=400"
+
+REM Context window. The 128000 default makes the KV cache eat around 5GB,
+REM pushing the model to 8.4GB so it no longer fits in 8GB of VRAM and part
+REM of it runs on CPU - measured 3x slower.
+set "BOT_NUM_CTX=4096"
+
+REM Game window title (case-insensitive substring match).
+set "BOT_WINDOW_TITLE=Roblox"
 
 echo [1/4] Checking Python...
 where python >nul 2>nul

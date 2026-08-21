@@ -1,0 +1,16 @@
+# AI 決策伺服器 (main.py / fastapi_server.py)
+fastapi>=0.110
+uvicorn[standard]>=0.27
+requests>=2.31
+pydantic>=2.6
+
+# fastapi_server.py 走 ollama 套件；main.py 只用 requests 直接打 Ollama HTTP API
+ollama>=0.3
+
+# Named Pipe 客戶端的 OpenCV 影像辨識 (python_client.py)
+opencv-python>=4.9
+numpy>=1.26
+
+# pack_session.py / preview_session.py 也只用 opencv + numpy，不必另外裝東西。
+# ffmpeg 是「可選」的外部程式（不是 pip 套件）：裝了 pack_session.py 會用
+# H.264 壓得更小、品質可調；沒裝就退回 OpenCV 內建的 mp4v，一樣能用。

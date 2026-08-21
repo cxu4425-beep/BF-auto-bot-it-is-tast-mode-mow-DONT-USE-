@@ -1,3 +1,7 @@
+// .Designer.cs 會被編譯器當成自動產生的檔案，不套用專案層級的 <Nullable>enable</Nullable>。
+// 下面用到 IContainer? 與 null! 這些可為 null 的註釋，必須在檔案內明確開啟才不會觸發 CS8669。
+#nullable enable
+
 namespace BloxFruitsBot
 {
     partial class MainForm
@@ -5,9 +9,9 @@ namespace BloxFruitsBot
         /// <summary>
         /// Required designer variable.
         /// </summary>
-        private System.ComponentModel.IContainer components = null;
+        private System.ComponentModel.IContainer? components = null;
 
-        /// <summary>s
+        /// <summary>
         /// Clean up any resources being used.
         /// </summary>
         /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
@@ -81,8 +85,9 @@ namespace BloxFruitsBot
 
         #endregion
 
-        private System.Windows.Forms.Button btnStart;
-        private System.Windows.Forms.Button btnStop;
-        private System.Windows.Forms.RichTextBox richTextBoxLog;
+        // InitializeComponent() 一定會賦值，用 null! 告訴編譯器不必發 CS8618 警告
+        private System.Windows.Forms.Button btnStart = null!;
+        private System.Windows.Forms.Button btnStop = null!;
+        private System.Windows.Forms.RichTextBox richTextBoxLog = null!;
     }
 }

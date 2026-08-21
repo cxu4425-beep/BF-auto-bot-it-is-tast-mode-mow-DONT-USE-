@@ -191,37 +191,46 @@ def detect_hp_energy(image_path):
                 bar_contours.append((c, rx, ry, rect_w, rect_h))
         if not bar_contours:
             return None
+        # 取最寬的那一條當作血條本體
         bar_contours.sort(key=lambda item: item[3], reverse=True)
-        best_contour, rx, ry, rect_w, rect_h = bar_contours[0]
+        _, rx, ry, rect_w, rect_h = bar_contours[0]
         full_x = roi_x1 + rx
         full_y = roi_y1 + ry
         slice_y = ry + rect_h // 2
         if slice_y >= roi.shape[0]:
             slice_y = roi.shape[0] - 1
-        max_scan_w = min(int(w * 0.4), roi.shape[1] - rx)
-        total_width = rect_w
+
+        # 從「彩色填滿段的右端」開始往右掃描空槽(暗色)像素。
+        # 原本從 rx 開始掃是錯的：rx ~ rx+rect_w 整段都是亮色，
+        # 連續 20 個非暗色就 break，根本掃不到後面真正的空槽。
+        filled_end = rx + rect_w
+        scan_limit = min(rx + int(w * 0.4), roi.shape[1])
+        bar_end = filled_end
         consecutive_not_dark = 0
-        dark_pixel_count = 0
-        for k in range(rx, max_scan_w):
+        for k in range(filled_end, scan_limit):
             px_hsv = hsv[slice_y, k]
-            h_val, s_val, v_val = px_hsv[0], px_hsv[1], px_hsv[2]
-            is_dark = (v_val < 60 and s_val < 50)
-            if is_dark:
+            s_val, v_val = px_hsv[1], px_hsv[2]
+            if v_val < 60 and s_val < 50:  # 暗色 = 血條已被消耗的空槽
                 consecutive_not_dark = 0
-                dark_pixel_count += 1
-                total_width = k
+                bar_end = k + 1
             else:
                 consecutive_not_dark += 1
-            if consecutive_not_dark > 20:
-                break
-        if dark_pixel_count > rect_w * 0.3:
-            return None
-        ratio = 1.0 if total_width <= rx else float(rx) / total_width
+                if consecutive_not_dark > 20:  # 連續 20px 都不是空槽，視為血條到此結束
+                    break
+
+        # 比例 = 彩色填滿寬度 / 整條血條總寬度。
+        # 原本寫成 float(rx) / total_width：rx 是血條左緣座標、total_width 是絕對 x 座標，
+        # 量綱完全對不上。實測（合成血條圖）結果是讀數會「反過來」：
+        #   真實血量 100% -> 讀成 20%，60% -> 33%，20% -> 讀成 100%。
+        # 也就是滿血時瘋狂逃跑、快死時反而衝上去打，行為完全顛倒。
+        full_width = bar_end - rx
+        ratio = 1.0 if full_width <= 0 else float(rect_w) / full_width
         ratio = max(0.0, min(1.0, ratio))
+
         cv2.rectangle(debug_img, (full_x, full_y), (full_x + rect_w, full_y + rect_h), draw_color, 2)
-        if total_width > rx:
-            cv2.rectangle(debug_img, (full_x + rect_w, full_y), (full_x + total_width, full_y + rect_h), (50, 50, 50), 1)
-        cv2.putText(debug_img, f"{color_name}: {int(ratio * 100)}%", (full_x, full_y - 5), 
+        if full_width > rect_w:
+            cv2.rectangle(debug_img, (full_x + rect_w, full_y), (full_x + full_width, full_y + rect_h), (50, 50, 50), 1)
+        cv2.putText(debug_img, f"{color_name}: {int(ratio * 100)}%", (full_x, full_y - 5),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, draw_color, 1)
         return ratio
     

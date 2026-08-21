@@ -1,0 +1,21 @@
+# .NET build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Bot runtime output
+Screenshots/
+debug_detection.png
+
+# Observation-run output (decision logs and the frames they refer to)
+decisions*.jsonl
+observe_frames*/
+last_frame.jpg

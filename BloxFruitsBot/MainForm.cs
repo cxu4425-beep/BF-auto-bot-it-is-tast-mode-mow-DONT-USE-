@@ -8,9 +8,9 @@ namespace BloxFruitsBot
 { 
     public partial class MainForm : Form 
     { 
-        private NamedPipeManager _pipeManager; 
-        private BotCore _botCore; 
-        private IntPtr _robloxHwnd = IntPtr.Zero; 
+        private NamedPipeManager? _pipeManager;
+        private BotCore? _botCore;
+        private IntPtr _robloxHwnd = IntPtr.Zero;
         private string _screenshotSavePath = "Screenshots"; 
         private bool _isRunning = false; 
  
@@ -28,20 +28,20 @@ namespace BloxFruitsBot
             } 
         } 
  
-        private void MainForm_Load(object sender, EventArgs e) 
+        private void MainForm_Load(object? sender, EventArgs e)
         { 
             _pipeManager = new NamedPipeManager("BloxFruitsPipe", Log); 
             _pipeManager.OnPythonResponseReceived += HandlePythonResponse; 
             _pipeManager.StartServer(); 
         } 
  
-        private void MainForm_FormClosing(object sender, FormClosingEventArgs e) 
+        private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
         { 
             _pipeManager?.StopServer(); 
             _botCore?.Stop(); 
         } 
  
-        private void btnStart_Click(object sender, EventArgs e) 
+        private void btnStart_Click(object? sender, EventArgs e)
         { 
             Log("嘗試啟動 Bot..."); 
             string windowTitle = "Roblox"; // Roblox 視窗標題 
@@ -66,9 +66,12 @@ namespace BloxFruitsBot
                 { 
                     try 
                     { 
-                        string screenshotPath = ScreenshotManager.CaptureWindow(_robloxHwnd, _screenshotSavePath); 
-                        Log($"截圖已保存: {screenshotPath}"); 
-                        await _pipeManager.SendMessage(screenshotPath); 
+                        string screenshotPath = ScreenshotManager.CaptureWindow(_robloxHwnd, _screenshotSavePath);
+                        Log($"截圖已保存: {screenshotPath}");
+                        if (_pipeManager != null)
+                        {
+                            await _pipeManager.SendMessage(screenshotPath);
+                        }
                     } 
                     catch (Exception ex) 
                     { 
@@ -79,7 +82,7 @@ namespace BloxFruitsBot
             }); 
         } 
  
-        private void btnStop_Click(object sender, EventArgs e) 
+        private void btnStop_Click(object? sender, EventArgs e)
         { 
             Log("嘗試停止 Bot..."); 
             _isRunning = false; 
