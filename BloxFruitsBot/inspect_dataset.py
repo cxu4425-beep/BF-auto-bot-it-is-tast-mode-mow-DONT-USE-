@@ -6,13 +6,47 @@
 
 用法:
     python inspect_dataset.py <session 資料夾>
-    python inspect_dataset.py <根資料夾>        # 會列出底下所有 session
+    python inspect_dataset.py <根資料夾>        # 會列出底下所有 session，
+                                               # 並依標籤統計資料平不平衡
 """
 
 import json
 import sys
-from collections import Counter
+import unicodedata
+from collections import Counter, defaultdict
 from pathlib import Path
+
+# 最多的標籤是最少的幾倍就該補錄。差 2 倍的時候，少的那類還撐得住；
+# 到 3、4 倍時模型會把多數類當成通用解，而這件事從訓練損失上看不出來 ——
+# 少數類就算全錯，對整體損失的影響也很小。
+BALANCE_WARN_RATIO = 2.0
+
+
+def width(text):
+    """終端機顯示寬度。中文是全形，一個字算一格會讓表格排歪。"""
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+
+
+def pad(text, n):
+    return text + " " * max(0, n - width(text))
+
+
+def count_frames(path: Path, meta: dict):
+    """回傳 (張數, 來源說明)。張數不確定時回傳 None。
+
+    frames/ 被 pack_session.py 壓成 frames.mp4 之後就沒有 jpg 了，
+    這時候要改看 meta.json 記下的張數，否則會誤判成「影格全部不見」。
+    """
+    frames_dir = path / "frames"
+    if frames_dir.exists():
+        n = len(list(frames_dir.glob("*.jpg")))
+        if n:
+            return n, "frames/"
+    if (path / "frames.mp4").exists():
+        packed = meta.get("packed") or {}
+        n = packed.get("frames")
+        return (n if isinstance(n, int) else None), "frames.mp4"
+    return 0, "frames/"
 
 
 def load_session(path: Path):
@@ -22,7 +56,9 @@ def load_session(path: Path):
         raise FileNotFoundError(f"找不到 {actions_path}")
 
     records = []
-    for lineno, line in enumerate(actions_path.read_text(encoding="utf-8").splitlines(), 1):
+    # utf-8-sig：舊版錄製器寫出來的檔案開頭有 BOM，不吃掉會在第一行就解析失敗
+    for lineno, line in enumerate(
+            actions_path.read_text(encoding="utf-8-sig").splitlines(), 1):
         line = line.strip()
         if not line:
             continue
@@ -31,30 +67,40 @@ def load_session(path: Path):
         except json.JSONDecodeError as exc:
             raise ValueError(f"{actions_path}:{lineno} 不是合法 JSON: {exc}") from exc
 
-    frames = sorted(frames_dir.glob("*.jpg")) if frames_dir.exists() else []
     meta = {}
     meta_path = path / "meta.json"
     if meta_path.exists():
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    return records, frames, meta
+        meta = json.loads(meta_path.read_text(encoding="utf-8-sig"))
+
+    n_frames, source = count_frames(path, meta)
+    return records, n_frames, source, meta
 
 
-def report(path: Path) -> bool:
-    """回傳 True 表示這份資料看起來可以拿去訓練。"""
-    records, frames, meta = load_session(path)
+def report(path: Path) -> dict:
+    """印出單一 session 的檢查結果，並回傳供彙總用的統計。"""
+    records, n_frames, source, meta = load_session(path)
     problems = []
+    label = (meta.get("label") or "").strip()
 
     print(f"\n=== {path.name} ===")
+    if label:
+        print(f"  標籤       : {label}")
+    else:
+        print("  標籤       : （沒有標籤）")
+
     if not records:
         print("  ❌ 沒有任何動作紀錄")
-        return False
+        return {"ok": False, "label": label, "frames": 0, "duration": 0.0}
 
-    print(f"  影格檔案   : {len(frames)}")
+    if n_frames is None:
+        print(f"  影格檔案   : ?（已打包成 {source}，meta.json 沒記張數）")
+    else:
+        print(f"  影格檔案   : {n_frames}" + (f"（來自 {source}）" if source != "frames/" else ""))
     print(f"  動作紀錄   : {len(records)}")
 
     # 影格與動作必須一一對應，否則訓練時圖文不符
-    if len(frames) != len(records):
-        problems.append(f"影格數 {len(frames)} 與動作數 {len(records)} 不一致")
+    if n_frames is not None and n_frames != len(records):
+        problems.append(f"影格數 {n_frames} 與動作數 {len(records)} 不一致")
 
     indices = [r["i"] for r in records]
     if indices != list(range(len(indices))):
@@ -119,7 +165,59 @@ def report(path: Path) -> bool:
             print(f"      - {p}")
     else:
         print("  ✅ 看起來可以用")
-    return not problems
+
+    return {
+        "ok": not problems,
+        "label": label,
+        "frames": len(records) if n_frames is None else n_frames,
+        "duration": duration,
+    }
+
+
+def balance_report(stats: list) -> bool:
+    """依標籤統計，看資料有沒有偏到某一類。回傳 True 表示夠平衡。
+
+    這是「戰鬥 + 導航一起做」時最容易翻車的地方：室內只錄了三趟、
+    室外錄了二十趟，訓練損失照樣漂亮，但模型在室內會亂走。
+    """
+    groups = defaultdict(lambda: {"sessions": 0, "frames": 0, "duration": 0.0})
+    unlabelled = 0
+    for s in stats:
+        key = s["label"] or "（沒有標籤）"
+        if not s["label"]:
+            unlabelled += 1
+        g = groups[key]
+        g["sessions"] += 1
+        g["frames"] += s["frames"]
+        g["duration"] += s["duration"]
+
+    total = sum(g["frames"] for g in groups.values())
+    if total <= 0:
+        return True
+
+    print("\n標籤分布：")
+    name_w = max(width(k) for k in groups) + 2
+    for name, g in sorted(groups.items(), key=lambda kv: -kv[1]["frames"]):
+        pct = g["frames"] / total
+        bar = "█" * int(round(pct * 30))
+        print(f"  {pad(name, name_w)}{g['sessions']:>3} 段 · {g['frames']:>7,} 幀 · "
+              f"{g['duration'] / 60:>5.1f} 分 · {pct:>5.1%}  {bar}")
+
+    ok = True
+    labelled = {k: v for k, v in groups.items() if k != "（沒有標籤）"}
+    if len(labelled) >= 2:
+        lo = min(g["frames"] for g in labelled.values())
+        hi = max(g["frames"] for g in labelled.values())
+        if lo > 0 and hi / lo > BALANCE_WARN_RATIO:
+            print(f"\n  ⚠ 最多的標籤是最少的 {hi / lo:.1f} 倍"
+                  f"（超過 {BALANCE_WARN_RATIO:.0f} 倍就該補錄少的那邊）。")
+            print("    模型會把數量多的那類當成通用解，而這件事從訓練損失上看不出來。")
+            ok = False
+    if unlabelled:
+        print(f"\n  ⚠ 有 {unlabelled} 段沒有標籤，沒被算進上面的比例。"
+              "\n    錄製器的「這段是什麼」欄位填了才統計得到。")
+
+    return ok
 
 
 def main() -> int:
@@ -140,19 +238,25 @@ def main() -> int:
         return 2
 
     ok = True
-    total_frames = 0
+    stats = []
     for s in sessions:
         try:
-            if not report(s):
+            result = report(s)
+            stats.append(result)
+            if not result["ok"]:
                 ok = False
-            total_frames += len(list((s / "frames").glob("*.jpg")))
         except Exception as exc:
             print(f"\n=== {s.name} ===\n  ❌ 讀取失敗: {exc}")
             ok = False
 
-    if len(sessions) > 1:
-        print(f"\n總計 {len(sessions)} 個 session，{total_frames} 幀")
-        print(f"以 10Hz 估算約 {total_frames / 10 / 60:.0f} 分鐘的示範資料")
+    if len(sessions) > 1 and stats:
+        total_frames = sum(s["frames"] for s in stats)
+        total_minutes = sum(s["duration"] for s in stats) / 60
+        print(f"\n總計 {len(sessions)} 個 session，{total_frames:,} 幀，"
+              f"約 {total_minutes:.0f} 分鐘的示範資料")
+        # 時長直接從紀錄的時間戳算，不再假設一定是 10Hz
+        if not balance_report(stats):
+            ok = False
 
     return 0 if ok else 1
 

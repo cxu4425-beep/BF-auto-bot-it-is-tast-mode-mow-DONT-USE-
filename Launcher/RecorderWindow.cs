@@ -34,6 +34,7 @@ namespace BloxFruitsLauncher
         private readonly BackdropPanel _root = new() { Dock = DockStyle.Fill };
         private readonly NumericUpDown _rate = new();
         private readonly NumericUpDown _width = new();
+        private readonly ComboBox _label = new();
         private readonly TextBox _outDir = new();
         private readonly FlatButton _btnStart = new();
         private readonly FlatButton _btnStop = new();
@@ -46,6 +47,12 @@ namespace BloxFruitsLauncher
         private CancellationTokenSource? _cts;
         private volatile int _frames;
         private volatile int _skipped;
+        // Encoding.UTF8 這個靜態屬性帶 BOM，而 StreamWriter 在檔案剛建立時會把
+        // 那三個位元組寫進去。JSONL 的第一行因此變成 \ufeff{"i":0,...}，
+        // 逐行 json.loads 會在第一行就炸掉 —— 而且只有真實錄製的檔案會這樣，
+        // 手寫的測試資料不會，所以特別容易漏掉。
+        private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
+
         private DateTime _startedAt;
         private string _sessionDir = "";
         private volatile string _liveKeys = "";
@@ -117,12 +124,13 @@ namespace BloxFruitsLauncher
                 Dock = DockStyle.Top,
                 Height = 70,
                 BackColor = Color.Transparent,
-                ColumnCount = 3,
+                ColumnCount = 4,
                 RowCount = 2,
             };
-            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22f));
-            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22f));
-            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 56f));
+            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 18f));
+            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 18f));
+            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28f));
+            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 36f));
             settings.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
             settings.RowStyles.Add(new RowStyle(SizeType.Absolute, 46f));
 
@@ -139,16 +147,27 @@ namespace BloxFruitsLauncher
             _width.Minimum = 128; _width.Maximum = 960; _width.Increment = 32;
             _width.Value = 320; _width.BorderStyle = BorderStyle.None; Style(_width);
 
+            // 可以直接選，也可以自己打。用下拉選單而不是純文字框，是為了讓
+            // 同一種情境每次都拿到「一模一樣」的字串 —— 「室內出生」和
+            // 「室内出生」在統計上會被當成兩類，資料平衡就白算了。
+            _label.DropDownStyle = ComboBoxStyle.DropDown;
+            _label.FlatStyle = FlatStyle.Flat;
+            _label.Items.AddRange(new object[] { "室內出生", "室外出生", "戰鬥", "接任務" });
+            _label.Text = "室內出生";
+            Style(_label);
+
             _outDir.Text = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BloxFruitsDemos");
             _outDir.BorderStyle = BorderStyle.None; Style(_outDir);
 
             settings.Controls.Add(Caption("取樣頻率 Hz"), 0, 0);
             settings.Controls.Add(Caption("影像寬度 px"), 1, 0);
-            settings.Controls.Add(Caption("輸出資料夾"), 2, 0);
-            settings.Controls.Add(Wrap(_rate, 150), 0, 1);
-            settings.Controls.Add(Wrap(_width, 150), 1, 1);
-            settings.Controls.Add(Wrap(_outDir, 440), 2, 1);
+            settings.Controls.Add(Caption("這段是什麼"), 2, 0);
+            settings.Controls.Add(Caption("輸出資料夾"), 3, 0);
+            settings.Controls.Add(Wrap(_rate, 140), 0, 1);
+            settings.Controls.Add(Wrap(_width, 140), 1, 1);
+            settings.Controls.Add(Wrap(_label, 220), 2, 1);
+            settings.Controls.Add(Wrap(_outDir, 290), 3, 1);
 
             var hint = new Label
             {
@@ -321,10 +340,17 @@ namespace BloxFruitsLauncher
                 return;
             }
 
+            string label = _label.Text.Trim();
+
             try
             {
                 string root = _outDir.Text.Trim();
-                _sessionDir = Path.Combine(root, $"session_{DateTime.Now:yyyyMMdd_HHmmss}");
+                // 標籤也寫進資料夾名稱。meta.json 才是給程式讀的來源，
+                // 但你在檔案總管裡翻的時候，看得懂哪段是哪段差很多。
+                string suffix = SanitiseForPath(label);
+                _sessionDir = Path.Combine(root,
+                    $"session_{DateTime.Now:yyyyMMdd_HHmmss}"
+                    + (suffix.Length > 0 ? "_" + suffix : ""));
                 Directory.CreateDirectory(Path.Combine(_sessionDir, "frames"));
             }
             catch (Exception ex)
@@ -343,13 +369,16 @@ namespace BloxFruitsLauncher
             _btnStop.Enabled = true;
             _rate.Enabled = false;
             _width.Enabled = false;
+            _label.Enabled = false;
 
             Log($"▸ 開始錄製 → {_sessionDir}", Theme.Ok);
             Log($"▸ {_rate.Value} Hz · 影像寬度 {_width.Value}px · 切到 Roblox 開始操作", Theme.TextDim);
+            if (label.Length == 0)
+                Log("▸ 這段沒有標籤 —— inspect_dataset.py 統計不到它的比例。", Theme.Warn);
 
             int hz = (int)_rate.Value;
             int width = (int)_width.Value;
-            _ = Task.Run(() => RecordLoop(hwnd, hz, width, _sessionDir, _cts.Token));
+            _ = Task.Run(() => RecordLoop(hwnd, hz, width, _sessionDir, label, _cts.Token));
         }
 
         private void StopRecording(bool quiet)
@@ -370,9 +399,26 @@ namespace BloxFruitsLauncher
             _btnStop.Enabled = false;
             _rate.Enabled = true;
             _width.Enabled = true;
+            _label.Enabled = true;
         }
 
-        private void RecordLoop(IntPtr hwnd, int hz, int targetWidth, string dir, CancellationToken token)
+        /// <summary>把標籤變成能放進檔名的字串。中文本身合法，要擋的是 \ / : * ? 這些。</summary>
+        private static string SanitiseForPath(string text)
+        {
+            var sb = new StringBuilder(text.Length);
+            foreach (char c in text)
+            {
+                if (Array.IndexOf(Path.GetInvalidFileNameChars(), c) >= 0 || c == ' ')
+                {
+                    continue;
+                }
+                sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
+        private void RecordLoop(IntPtr hwnd, int hz, int targetWidth, string dir, string label,
+                                CancellationToken token)
         {
             string framesDir = Path.Combine(dir, "frames");
             string actionsPath = Path.Combine(dir, "actions.jsonl");
@@ -380,9 +426,9 @@ namespace BloxFruitsLauncher
 
             try
             {
-                WriteMeta(dir, hz, targetWidth);
+                WriteMeta(dir, hz, targetWidth, label);
 
-                using var actions = new StreamWriter(actionsPath, append: false, Encoding.UTF8);
+                using var actions = new StreamWriter(actionsPath, append: false, Utf8NoBom);
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 int index = 0;
 
@@ -478,11 +524,12 @@ namespace BloxFruitsLauncher
             return sb.ToString();
         }
 
-        private void WriteMeta(string dir, int hz, int width)
+        private void WriteMeta(string dir, int hz, int width, string label)
         {
             var sb = new StringBuilder();
             sb.AppendLine("{");
             sb.AppendLine($"  \"recorded_at\": \"{DateTime.Now:yyyy-MM-ddTHH:mm:ss}\",");
+            sb.AppendLine($"  \"label\": \"{JsonEscape(label)}\",");
             sb.AppendLine($"  \"sample_rate_hz\": {hz},");
             sb.AppendLine($"  \"frame_width\": {width},");
             sb.Append("  \"tracked_keys\": [");
@@ -495,7 +542,29 @@ namespace BloxFruitsLauncher
             sb.AppendLine("  \"mouse\": \"mx/my 為游標在客戶區內的相對座標 0..1\",");
             sb.AppendLine("  \"note\": \"僅在遊戲視窗為前景時取樣；非前景的時段直接略過而不是補空白\"");
             sb.AppendLine("}");
-            File.WriteAllText(Path.Combine(dir, "meta.json"), sb.ToString(), Encoding.UTF8);
+            File.WriteAllText(Path.Combine(dir, "meta.json"), sb.ToString(), Utf8NoBom);
+        }
+
+        /// <summary>標籤是自由輸入的，打了引號或反斜線就會生出壞掉的 JSON。</summary>
+        private static string JsonEscape(string text)
+        {
+            var sb = new StringBuilder(text.Length + 8);
+            foreach (char c in text)
+            {
+                switch (c)
+                {
+                    case '"': sb.Append("\\\""); break;
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default:
+                        if (c < 0x20) sb.Append("\\u").Append(((int)c).ToString("x4"));
+                        else sb.Append(c);
+                        break;
+                }
+            }
+            return sb.ToString();
         }
 
         private void OpenOutputFolder()
